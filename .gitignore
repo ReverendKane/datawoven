@@ -1,0 +1,54 @@
+cat > .gitignore << 'EOF'
+# OS/editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+.conda/
+.env
+.env.*
+pip-wheel-metadata/
+*.egg-info/
+dist/
+build/
+.coverage
+htmlcov/
+
+# Node
+node_modules/
+.next/
+out/
+
+# Data / models / artifacts
+data/
+datasets/
+artifacts/
+models/
+checkpoints/
+wandb/
+mlruns/
+
+# Logs
+logs/
+*.log
+
+# Docker
+*.pid
+*.sock
+
+# Qt/Electron
+*.qlog
+*.cache/
+
+# Avoid committing local credentials
+secrets/
+EOF
+.gitattributes
