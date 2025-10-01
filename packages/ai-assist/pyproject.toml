@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "datawoven-ai-assist"
+version = "0.1.0"
+description = "AI assistance system for RAG discovery"
+dependencies = [
+    "fastapi>=0.104.0",
+    "langchain>=0.0.300",
+    "chromadb>=0.4.0",
+    # No internal datawoven dependencies here
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "black", "mypy"]

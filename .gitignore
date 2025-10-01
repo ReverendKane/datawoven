@@ -52,3 +52,8 @@ logs/
 secrets/
 EOF
 .gitattributes
+
+# Ignore production documents
+production/
+
+.idea/*
