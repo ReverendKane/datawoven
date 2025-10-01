@@ -1,0 +1,25 @@
+<!DOCTYPE RCC>
+<RCC version="1.0">
+    <qresource prefix="/">
+        <file alias="three_dots.png">assets/images/three_dots.png</file>
+        <file alias="three_dots_gray.png">assets/images/three_dots_gray.png</file>
+        <file alias="aiAdvisor_active_icon.svg">assets/svg/aiAdvisor_active_icon.svg</file>
+        <file alias="aiAdvisor_inactive_icon.svg">assets/svg/aiAdvisor_inactive_icon.svg</file>
+        <file alias="aiAdvisor_hover_icon.svg">assets/svg/aiAdvisor_hover_icon.svg</file>
+        <file alias="send_inactive_icon.svg">assets/svg/send_inactive_icon.svg</file>
+        <file alias="send_hover_icon.svg">assets/svg/send_hover_icon.svg</file>
+        <file alias="send_active_icon.svg">assets/svg/send_active_icon.svg</file>
+        <file alias="clear_inactive_icon.svg">assets/svg/clear_inactive_icon.svg</file>
+        <file alias="clear_hover_icon.svg">assets/svg/clear_hover_icon.svg</file>
+        <file alias="dictate_hover_icon.svg">assets/svg/dictate_hover_icon.svg</file>
+        <file alias="dictate_active_icon.svg">assets/svg/dictate_active_icon.svg</file>
+        <file alias="dictate_inactive_icon.svg">assets/svg/dictate_inactive_icon.svg</file>
+        <file alias="export_inactive_icon.svg">assets/svg/export_inactive_icon.svg</file>
+        <file alias="export_hover_icon.svg">assets/svg/export_hover_icon.svg</file>
+        <file alias="datawoven_bannerLogo_white.svg">assets/svg/datawoven_bannerLogo_white.svg</file>
+        <file alias="datawoven_splashLogo_white.svg">assets/svg/datawoven_splashLogo_white.svg</file>
+        <file alias="warning_icon.svg">assets/svg/warning_icon.svg</file>
+        <file alias="splash_logo.svg">assets/svg/splash_logo.svg</file>
+        <file alias="checkmark.svg">assets/svg/checkmark.svg</file>
+    </qresource>
+</RCC>
