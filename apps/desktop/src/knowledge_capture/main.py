@@ -1,3 +1,13 @@
+# --- Windows Qt DLL path fix (must run before importing PySide6) ---
+import os, sys, pathlib
+env_root = sys.prefix  # points at C:\Users\<you>\miniconda3\envs\rag
+qt_bin = pathlib.Path(env_root, "Library", "bin")
+if qt_bin.exists():
+    os.add_dll_directory(str(qt_bin))
+# -------------------------------------------------------------------
+
+from PySide6.QtWidgets import QApplication, QWidget, QSizePolicy
+
 import sys
 import os
 from dotenv import load_dotenv
@@ -818,6 +828,9 @@ class KnowledgeCaptureApp(QMainWindow):
         self.summarization_thread = None
         self._text_timer = None
 
+        # Add metadata panel reference
+        self.metadata_panel = None
+
         self.init_ui()
         self.setup_shortcuts()
         self.load_settings()
@@ -843,35 +856,56 @@ class KnowledgeCaptureApp(QMainWindow):
         self.setGeometry(100, 100, 1400, 900)
 
         self.setStyleSheet("""
-                QPushButton {
-                    cursor: pointer;
-                    padding: 6px 12px;
-                    border: 1px solid #555555;
-                    border-radius: 4px;
-                    background-color: #404040;
-                    color: #ffffff;
-                }
-                QPushButton:hover {
-                    cursor: pointer;
-                    background-color: #000000;
-                    border: none;
-                    color: #ffffff;
-                }
-                QPushButton:pressed {
-                    background-color: #222222;
-                    border: none;
-                }
-                QPushButton:disabled {
-                    cursor: default;
-                    background-color: #2a2a2a;
-                    color: #666666;
-                    border-color: #333333;
-                }
-            """)
+            QPushButton {
+                cursor: pointer;
+                padding: 6px 12px;
+                border: 1px solid #555555;
+                border-radius: 4px;
+                background-color: #404040;
+                color: #ffffff;
+            }
+            QPushButton:hover {
+                cursor: pointer;
+                background-color: #000000;
+                border: none;
+                color: #ffffff;
+            }
+            QPushButton:pressed {
+                background-color: #222222;
+                border: none;
+            }
+            QPushButton:disabled {
+                cursor: default;
+                background-color: #2a2a2a;
+                color: #666666;
+                border-color: #333333;
+            }
+        """)
 
-        # Main mode tabs at the top level
+        # Scroll area as central widget
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setFrameShape(QFrame.NoFrame)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.setCentralWidget(scroll_area)
+
+        # Container inside scroll
+        main_widget = QWidget()
+        main_widget.setMinimumHeight(1200)  # Force total height larger than typical window
+        scroll_area.setWidget(main_widget)
+
+        main_layout = QVBoxLayout(main_widget)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+
+        # Metadata panel - fixed 280px, won't scale
+        self.metadata_panel = MetadataPanel(self.get_output_folder)
+        main_layout.addWidget(self.metadata_panel)
+
+        # Tabs - take remaining space, minimum 600px
         self.mode_tabs = QTabWidget()
-        self.setCentralWidget(self.mode_tabs)
+        self.mode_tabs.setMinimumHeight(600)
+        main_layout.addWidget(self.mode_tabs, 1)
 
         # OCR Mode
         ocr_widget = self.create_ocr_mode()
@@ -883,6 +917,10 @@ class KnowledgeCaptureApp(QMainWindow):
 
         # Status bar
         self.statusBar().showMessage("Ready for knowledge capture")
+
+    def get_output_folder(self) -> str:
+        """Helper to get current output folder for metadata panel"""
+        return self.ocr_output_folder_input.text()
 
     def create_ocr_mode(self):
         """Create the OCR mode interface"""
@@ -1485,43 +1523,69 @@ class KnowledgeCaptureApp(QMainWindow):
             self.text_output_folder_input.setText(folder)
 
     def save_markdown(self, mode: str):
-        """Save the markdown content to file"""
+        """Save the markdown content and metadata to files"""
         if mode == 'ocr':
             content = self.ocr_markdown_edit.toPlainText()
-            title = self.ocr_title_input.text().strip()
             output_folder = self.ocr_output_folder_input.text()
+            ai_provider = self.ocr_ai_provider.currentText()
+            summary_style = self.ocr_summary_style.currentText()
+            processing_method = f"ocr_summary_{summary_style}"
         else:  # text mode
             content = self.text_markdown_edit.toPlainText()
-            title = self.text_title_input.text().strip()
             output_folder = self.text_output_folder_input.text()
+            ai_provider = self.text_ai_provider.currentText()
+            summary_style = self.text_summary_style.currentText()
+            processing_method = f"text_input_summary_{summary_style}"
 
         if not content:
             return
 
-        # Generate filename
-        if title:
+        # Get metadata from panel
+        metadata = self.metadata_panel.get_metadata(
+            mode, processing_method, ai_provider, summary_style
+        )
+
+        # Print metadata to console
+        self.metadata_panel.print_metadata(metadata)
+
+        # Generate filename from title or use document_id
+        if metadata.get("title"):
             # Sanitize title for filename
-            filename = "".join(c for c in title if c.isalnum() or c in (' ', '-', '_')).rstrip()
-            filename = filename.replace(' ', '_') + '.md'
+            filename = "".join(c for c in metadata["title"] if c.isalnum() or c in (' ', '-', '_')).rstrip()
+            filename = filename.replace(' ', '_')
         else:
-            # Random filename
-            filename = f"capture_{uuid.uuid4().hex[:8]}.md"
+            # Use first 8 chars of document_id
+            filename = metadata["document_id"][:8]
 
         # Get output directory
         output_dir = Path(output_folder)
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        # Save file
-        output_path = output_dir / filename
+        # Save markdown file
+        md_path = output_dir / f"{filename}.md"
+        json_path = output_dir / f"{filename}.json"
+
         try:
-            with open(output_path, 'w', encoding='utf-8') as f:
+            # Save markdown
+            with open(md_path, 'w', encoding='utf-8') as f:
                 f.write(content)
 
-            self.statusBar().showMessage(f"Saved: {output_path}")
-            QMessageBox.information(self, "Saved", f"Content saved to:\n{output_path}")
+            # Save metadata JSON
+            with open(json_path, 'w', encoding='utf-8') as f:
+                json.dump(metadata, f, indent=2, ensure_ascii=False)
+
+            # Save as defaults for next capture
+            self.metadata_panel.save_as_defaults()
+
+            self.statusBar().showMessage(f"Saved: {md_path} and {json_path}")
+            QMessageBox.information(
+                self,
+                "Saved",
+                f"Content saved to:\n{md_path}\n\nMetadata saved to:\n{json_path}"
+            )
 
         except Exception as e:
-            QMessageBox.warning(self, "Save Error", f"Failed to save file: {e}")
+            QMessageBox.warning(self, "Save Error", f"Failed to save files: {e}")
 
     def copy_to_clipboard(self, mode: str):
         """Copy markdown content to clipboard"""
@@ -1540,6 +1604,358 @@ class KnowledgeCaptureApp(QMainWindow):
         self.save_settings()
         event.accept()
         QApplication.quit()
+
+
+class MetadataPanel(QWidget):
+    """Shared metadata panel for both OCR and Text modes"""
+
+    def __init__(self, output_folder_callback):
+        super().__init__()
+        self.output_folder_callback = output_folder_callback
+        self.current_metadata = {}
+        self.init_ui()
+
+        # Fixed height - will NOT scale
+        self.setFixedHeight(500)
+
+    def init_ui(self):
+        """Initialize the metadata panel UI"""
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(10, 10, 10, 10)
+
+        # Header
+        header_layout = QHBoxLayout()
+        header_label = QLabel("Set Metadata")
+        header_label.setStyleSheet("font-weight: bold; font-size: 14px;")
+        header_layout.addWidget(header_label)
+        header_layout.addStretch()
+
+        # Buttons
+        self.clear_btn = QPushButton("Clear Fields")
+        self.clear_btn.setCursor(Qt.PointingHandCursor)
+        self.clear_btn.clicked.connect(self.clear_fields)
+        header_layout.addWidget(self.clear_btn)
+
+        self.load_defaults_btn = QPushButton("Load Last Defaults")
+        self.load_defaults_btn.setCursor(Qt.PointingHandCursor)
+        self.load_defaults_btn.clicked.connect(self.load_defaults)
+        header_layout.addWidget(self.load_defaults_btn)
+
+        self.quick_fill_btn = QPushButton("Quick Fill")
+        self.quick_fill_btn.setCursor(Qt.PointingHandCursor)
+        self.quick_fill_btn.clicked.connect(self.show_quick_fill_menu)
+        header_layout.addWidget(self.quick_fill_btn)
+
+        layout.addLayout(header_layout)
+
+        # Form layout directly (no scroll area here)
+        form_layout = QFormLayout()
+        form_layout.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
+
+        # Source Type (with auto-detect)
+        self.source_type = QComboBox()
+        self.source_type.setFixedHeight(30)
+        self.source_type.addItems([
+            "Auto-detect",
+            "book",
+            "screenshot",
+            "web_scrape",
+            "manual_notes",
+            "document",
+            "other"
+        ])
+        form_layout.addRow("Source Type:", self.source_type)
+
+        # Title
+        self.title_input = QLineEdit()
+        self.title_input.setPlaceholderText("Document title...")
+        form_layout.addRow("Title:", self.title_input)
+
+        # Original Source
+        self.original_source = QLineEdit()
+        self.original_source.setPlaceholderText("Book title, URL, etc...")
+        form_layout.addRow("Original Source:", self.original_source)
+
+        # Author
+        self.author_input = QLineEdit()
+        self.author_input.setPlaceholderText("Author name(s)...")
+        form_layout.addRow("Author:", self.author_input)
+
+        # Page Numbers
+        self.page_numbers = QLineEdit()
+        self.page_numbers.setPlaceholderText("e.g., 45-52 or 23, 45, 67")
+        form_layout.addRow("Page Numbers:", self.page_numbers)
+
+        # Tags
+        self.tags_input = QLineEdit()
+        self.tags_input.setPlaceholderText("comma, separated, tags")
+        form_layout.addRow("Tags:", self.tags_input)
+
+        # Processing Priority
+        self.priority = QComboBox()
+        self.priority.setFixedHeight(30)
+        self.priority.addItems(["medium", "high", "low"])
+        form_layout.addRow("Priority:", self.priority)
+
+        # Ready for Processing
+        self.ready_checkbox = QCheckBox("Ready for Pipeline 2 processing")
+        self.ready_checkbox.setChecked(True)
+        form_layout.addRow("", self.ready_checkbox)
+
+        # Quality Assessment
+        self.quality = QComboBox()
+        self.quality.setFixedHeight(30)
+        self.quality.addItems(["good", "excellent", "needs_review", "poor"])
+        form_layout.addRow("Quality:", self.quality)
+
+        # Notes (larger text area)
+        self.notes_input = QTextEdit()
+        self.notes_input.setPlaceholderText("Additional notes about this content...")
+        self.notes_input.setMaximumHeight(80)
+        form_layout.addRow("Notes:", self.notes_input)
+
+        layout.addLayout(form_layout)
+
+        self.setStyleSheet("""
+            QPushButton {
+                cursor: pointer;
+                padding: 6px 12px;
+                border: 1px solid #555555;
+                border-radius: 4px;
+                background-color: #404040;
+                color: #ffffff;
+            }
+            QPushButton:hover {
+                cursor: pointer;
+                background-color: #000000;
+                border: none;
+                color: #ffffff;
+            }
+            QPushButton:pressed {
+                background-color: #222222;
+                border: none;
+            }
+            QPushButton:disabled {
+                cursor: default;
+                background-color: #2a2a2a;
+                color: #666666;
+                border-color: #333333;
+            }
+
+            QLineEdit {
+                border: 1px solid #555555;
+                border-radius: 4px;
+                padding: 4px 8px;
+                background-color: #2d2d2d;
+                color: #ffffff;
+            }
+            QLineEdit:focus {
+                border: 1px solid #60A5FA;
+                background-color: #353535;
+            }
+
+            QTextEdit {
+                border: 1px solid #555555;
+                border-radius: 4px;
+                padding: 4px 8px;
+                background-color: #2d2d2d;
+                color: #ffffff;
+            }
+            QTextEdit:focus {
+                border: 1px solid #60A5FA;
+                background-color: #353535;
+            }
+
+            QComboBox {
+                padding: 4px 8px;
+            }
+            QComboBox QAbstractItemView::item {
+                min-height: 30px;  /* Height of each dropdown item */
+                padding: 6px 8px;
+            }
+        """)
+
+    def auto_detect_source_type(self, mode: str, has_page_numbers: bool,
+                                has_url: bool, has_screenshot: bool) -> str:
+        """Auto-detect source type based on context"""
+        if self.source_type.currentText() != "Auto-detect":
+            return self.source_type.currentText()
+
+        if mode == "ocr" and has_screenshot:
+            if has_page_numbers:
+                return "book"
+            return "screenshot"
+        elif mode == "text":
+            if has_url:
+                return "web_scrape"
+            elif has_page_numbers:
+                return "book"
+            return "manual_notes"
+
+        return "document"
+
+    def get_metadata(self, mode: str, processing_method: str,
+                     ai_provider: str, summary_style: str) -> Dict[str, Any]:
+        """Generate metadata dictionary from current fields"""
+
+        # Auto-detect source type
+        has_page_numbers = bool(self.page_numbers.text().strip())
+        has_url = "http://" in self.original_source.text() or "https://" in self.original_source.text()
+        has_screenshot = mode == "ocr"
+
+        detected_source_type = self.auto_detect_source_type(
+            mode, has_page_numbers, has_url, has_screenshot
+        )
+
+        # Parse tags
+        tags_text = self.tags_input.text().strip()
+        tags = [tag.strip() for tag in tags_text.split(",") if tag.strip()] if tags_text else []
+
+        metadata = {
+            "document_id": str(uuid.uuid4()),
+            "source_type": detected_source_type,
+            "original_source": self.original_source.text().strip(),
+            "capture_date": datetime.now().isoformat(),
+            "processing_method": processing_method,
+            "tags": tags,
+            "notes": self.notes_input.toPlainText().strip(),
+            "title": self.title_input.text().strip(),
+            "page_numbers": self.page_numbers.text().strip(),
+            "author": self.author_input.text().strip(),
+            "ready_for_processing": self.ready_checkbox.isChecked(),
+            "processing_priority": self.priority.currentText(),
+            "ai_provider_used": ai_provider,
+            "summary_style": summary_style,
+            "quality_assessment": self.quality.currentText()
+        }
+
+        self.current_metadata = metadata
+        return metadata
+
+    def save_as_defaults(self):
+        """Save current field values as defaults"""
+        try:
+            output_folder = self.output_folder_callback()
+            defaults_path = Path(output_folder) / "metadata_defaults.json"
+
+            defaults = {
+                "source_type": self.source_type.currentText(),
+                "author": self.author_input.text().strip(),
+                "tags": self.tags_input.text().strip(),
+                "priority": self.priority.currentText(),
+                "ready_for_processing": self.ready_checkbox.isChecked(),
+                "quality": self.quality.currentText()
+            }
+
+            with open(defaults_path, 'w', encoding='utf-8') as f:
+                json.dump(defaults, f, indent=2)
+
+        except Exception as e:
+            print(f"Failed to save defaults: {e}")
+
+    def load_defaults(self):
+        """Load previously saved defaults"""
+        try:
+            output_folder = self.output_folder_callback()
+            defaults_path = Path(output_folder) / "metadata_defaults.json"
+
+            if not defaults_path.exists():
+                QMessageBox.information(
+                    self,
+                    "No Defaults Found",
+                    "No saved defaults found. Capture content first to create defaults."
+                )
+                return
+
+            with open(defaults_path, 'r', encoding='utf-8') as f:
+                defaults = json.load(f)
+
+            # Restore fields
+            if "source_type" in defaults:
+                index = self.source_type.findText(defaults["source_type"])
+                if index >= 0:
+                    self.source_type.setCurrentIndex(index)
+
+            self.author_input.setText(defaults.get("author", ""))
+            self.tags_input.setText(defaults.get("tags", ""))
+
+            if "priority" in defaults:
+                index = self.priority.findText(defaults["priority"])
+                if index >= 0:
+                    self.priority.setCurrentIndex(index)
+
+            self.ready_checkbox.setChecked(defaults.get("ready_for_processing", True))
+
+            if "quality" in defaults:
+                index = self.quality.findText(defaults["quality"])
+                if index >= 0:
+                    self.quality.setCurrentIndex(index)
+
+            QMessageBox.information(self, "Defaults Loaded", "Previous defaults have been loaded.")
+
+        except Exception as e:
+            QMessageBox.warning(self, "Load Error", f"Failed to load defaults: {e}")
+
+    def clear_fields(self):
+        """Clear all metadata fields"""
+        self.source_type.setCurrentIndex(0)  # Auto-detect
+        self.title_input.clear()
+        self.original_source.clear()
+        self.author_input.clear()
+        self.page_numbers.clear()
+        self.tags_input.clear()
+        self.priority.setCurrentIndex(0)  # medium
+        self.ready_checkbox.setChecked(True)
+        self.quality.setCurrentIndex(0)  # good
+        self.notes_input.clear()
+
+    def show_quick_fill_menu(self):
+        """Show quick fill presets menu"""
+        from PySide6.QtWidgets import QMenu
+
+        menu = QMenu(self)
+
+        # Book preset
+        book_action = menu.addAction("Book Chapter")
+        book_action.triggered.connect(lambda: self.quick_fill_book())
+
+        # Web article preset
+        web_action = menu.addAction("Web Article")
+        web_action.triggered.connect(lambda: self.quick_fill_web())
+
+        # Documentation preset
+        doc_action = menu.addAction("Technical Documentation")
+        doc_action.triggered.connect(lambda: self.quick_fill_docs())
+
+        menu.exec(self.quick_fill_btn.mapToGlobal(self.quick_fill_btn.rect().bottomLeft()))
+
+    def quick_fill_book(self):
+        """Quick fill for book content"""
+        self.source_type.setCurrentText("book")
+        self.tags_input.setText("data_engineering, rag_implementation")
+        self.priority.setCurrentText("high")
+        self.quality.setCurrentText("excellent")
+
+    def quick_fill_web(self):
+        """Quick fill for web content"""
+        self.source_type.setCurrentText("web_scrape")
+        self.tags_input.setText("web_content")
+        self.priority.setCurrentText("medium")
+
+    def quick_fill_docs(self):
+        """Quick fill for technical documentation"""
+        self.source_type.setCurrentText("document")
+        self.tags_input.setText("technical_docs, reference")
+        self.priority.setCurrentText("high")
+        self.quality.setCurrentText("excellent")
+
+    def print_metadata(self, metadata: Dict[str, Any]):
+        """Print formatted metadata to console"""
+        print("\n" + "=" * 60)
+        print("CAPTURE METADATA")
+        print("=" * 60)
+        print(json.dumps(metadata, indent=2))
+        print("=" * 60 + "\n")
 
 
 def main():

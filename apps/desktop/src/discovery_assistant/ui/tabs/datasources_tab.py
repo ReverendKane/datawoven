@@ -601,17 +601,6 @@ class AttachmentDialog(QtWidgets.QDialog):
         self._apply_input_style(self.file_path_edit)
 
         self.browse_btn = QtWidgets.QPushButton("Browse...")
-        # self.browse_btn.setStyleSheet("""
-        #     QPushButton {
-        #         background:#A5BBCF;
-        #         color:#FFFFFF;
-        #         border:1px solid #A5BBCF;
-        #         border-radius:6px;
-        #         padding:6px 12px;
-        #         font-weight:500;
-        #     }
-        #     QPushButton:hover { background:#1f2937; border-color:#1f2937; }
-        # """)
         self.browse_btn.clicked.connect(self._browse_file)
 
         file_row.addWidget(self.file_path_edit, 1)
@@ -658,32 +647,9 @@ class AttachmentDialog(QtWidgets.QDialog):
         button_layout.addStretch(1)
 
         cancel_btn = QtWidgets.QPushButton("Cancel")
-        # cancel_btn.setStyleSheet("""
-        #     QPushButton {
-        #         background:#F3F4F6;
-        #         color:#374151;
-        #         border:1px solid #D1D5DB;
-        #         border-radius:6px;
-        #         padding:6px 16px;
-        #         font-weight:500;
-        #     }
-        #     QPushButton:hover { background:#E5E7EB; }
-        # """)
         cancel_btn.clicked.connect(self.reject)
 
         attach_btn = QtWidgets.QPushButton("Attach")
-        # attach_btn.setStyleSheet("""
-        #     QPushButton {
-        #         background:#A5BBCF;
-        #         color:#FFFFFF;
-        #         border:1px solid #A5BBCF;
-        #         border-radius:6px;
-        #         padding:6px 16px;
-        #         font-weight:500;
-        #     }
-        #     QPushButton:hover { background:#1f2937; border-color:#1f2937; }
-        #     QPushButton:disabled { background:#9CA3AF; border-color:#9CA3AF; color:#F3F4F6; }
-        # """)
         attach_btn.clicked.connect(self.accept)
 
         button_layout.addWidget(cancel_btn)
@@ -766,11 +732,6 @@ class AttachmentDialog(QtWidgets.QDialog):
         )
 
 
-# Import all the components from previous parts:
-# from data_sources_part1 import CONNECTION_TYPES, DataSourceItem, AttachmentMetadata, _force_dark_text, _StackedLabelForm
-# from data_sources_part2 import FlowLayout, AttachmentChip, ConnectionFormWidget
-# from data_sources_part3 import AttachmentDialog
-
 # -------------------------
 # Main Data Sources Tab
 # -------------------------
@@ -778,8 +739,9 @@ class AttachmentDialog(QtWidgets.QDialog):
 class DataSourcesTab(QtWidgets.QWidget):
     requestScreenshot = QtCore.Signal(int)  # row index
 
-    def __init__(self, parent: Optional[QtWidgets.QWidget] = None) -> None:
+    def __init__(self, parent: Optional[QtWidgets.QWidget] = None, policy_enforcer=None) -> None:
         super().__init__(parent)
+        self._policy_enforcer = policy_enforcer
         _LOGGER.info("DataSourcesTab initialized")
 
         # ---- scroller ----
@@ -789,14 +751,6 @@ class DataSourcesTab(QtWidgets.QWidget):
         scroller.setFrameShape(QtWidgets.QFrame.NoFrame)
         scroller.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOn)
         scroller.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
-        # scroller.setStyleSheet("""
-        #     QScrollArea#DataSourcesScroll { background: transparent; border: none; }
-        #     QScrollBar:vertical { background: transparent; width: 12px; margin: 8px 2px 8px 0px; }
-        #     QScrollBar::handle:vertical { background: #D1D5DB; min-height: 24px; border-radius: 6px; }
-        #     QScrollBar::handle:vertical:hover { background: #9CA3AF; }
-        #     QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; }
-        #     QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: transparent; }
-        # """)
         self._scroller = scroller
 
         root = QtWidgets.QWidget()
@@ -855,6 +809,7 @@ class DataSourcesTab(QtWidgets.QWidget):
         self.name_edit = QtWidgets.QLineEdit()
         self.name_edit.setPlaceholderText("Descriptive name for this data source (e.g., Customer Database)")
         _force_dark_text(self.name_edit)
+        self._apply_field_policy(self.name_edit, "Source Name")
         form.add_row("Source Name", self.name_edit)
 
         # Connection type selector
@@ -863,6 +818,7 @@ class DataSourcesTab(QtWidgets.QWidget):
         combo_container_layout.setContentsMargins(0, 0, 0, 0)
 
         self.type_combo = QtWidgets.QComboBox()
+        self._apply_field_policy(self.type_combo, "Connection Type")
         self.type_combo.addItems([
             "Database",
             "API/Web Service",
@@ -894,6 +850,7 @@ class DataSourcesTab(QtWidgets.QWidget):
         self.description_edit.setPlaceholderText("Describe what data this source contains and how it will be used...")
         self.description_edit.setMinimumHeight(80)
         _force_dark_text(self.description_edit)
+        self._apply_field_policy(self.description_edit, "Description")
         desc_form.add_row("Description", self.description_edit)
 
         card_layout.addWidget(desc_form_host)
@@ -926,6 +883,14 @@ class DataSourcesTab(QtWidgets.QWidget):
         actions_row.addWidget(self.btn_attach, 0, QtCore.Qt.AlignLeft)
         actions_row.addWidget(self.btn_capture, 0, QtCore.Qt.AlignLeft)
         actions_row.addStretch(1)
+
+        # Apply policy to attachment functionality
+        if self._policy_enforcer and not self._policy_enforcer.is_field_enabled("Data Sources",
+                                                                                "Screenshots/Attachments"):
+            self.btn_attach.setEnabled(False)
+            self.btn_attach.setToolTip("Attachments have been disabled by your organization's discovery policy.")
+            self.btn_capture.setEnabled(False)
+            self.btn_capture.setToolTip("Screenshots have been disabled by your organization's discovery policy.")
 
         # Cancel button (hidden by default)
         self.btn_cancel = QtWidgets.QPushButton("Cancel Edit")
@@ -1185,6 +1150,35 @@ class DataSourcesTab(QtWidgets.QWidget):
             return files_dir in file_path.parents
         except Exception:
             return False
+
+    def _apply_field_policy(self, widget: QtWidgets.QWidget, field_name: str) -> None:
+        """Apply policy governance to a field widget"""
+        if not self._policy_enforcer or not self._policy_enforcer.has_policy():
+            return
+
+        section_name = "Data Sources"
+
+        if not self._policy_enforcer.is_field_enabled(section_name, field_name):
+            widget.setEnabled(False)
+            if isinstance(widget, (QtWidgets.QLineEdit, QtWidgets.QTextEdit)):
+                widget.setStyleSheet(widget.styleSheet() + """
+                    QLineEdit:disabled, QTextEdit:disabled {
+                        background: #F3F4F6;
+                        color: #9CA3AF;
+                        border: 1px solid #E5E7EB;
+                    }
+                """)
+            elif isinstance(widget, QtWidgets.QComboBox):
+                widget.setStyleSheet(widget.styleSheet() + """
+                    QComboBox:disabled {
+                        background: #F3F4F6;
+                        color: #9CA3AF;
+                    }
+                """)
+            widget.setToolTip(
+                f"This field has been disabled by your organization's discovery policy.\n"
+                f"This configuration was set by your administrator."
+            )
 
     def _get_section_name(self) -> str:
         return "data_sources"
@@ -1697,7 +1691,6 @@ class DataSourcesTab(QtWidgets.QWidget):
 
         # Reset connection status
         self.connection_status.setText("Connection not tested")
-        # self.connection_status.setStyleSheet("font-size:13px; color:#6B7280; background:transparent;")
 
         # Clear chips
         for i in reversed(range(self.chips_flow.count())):

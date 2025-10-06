@@ -66,3 +66,28 @@ the step-by-step process that would need to happen to solve your problem.</p>
 <p>Think about it like writing instructions for someone else to follow. This helps us understand 
 exactly what data, systems, and logic would be needed to build your solution.</p>
 """
+
+INSTRUCTIONS_INFO = """
+<p style="margin-bottom: 12px;">
+<strong>About This Tool</strong><br/>
+This Discovery Assistant helps identify where AI and automation can improve your work by documenting 
+your processes, pain points, and data sources.
+</p>
+
+<p style="margin-bottom: 12px;">
+<strong>What You'll Create</strong><br/>
+Your input drives solutions like AI-powered search trained on company data, intelligent task automation 
+agents, and smart document retrieval systems.
+</p>
+
+<p style="margin-bottom: 12px;">
+<strong>Complete Documentation</strong><br/>
+For detailed guidance, best practices, and step-by-step instructions, visit our complete documentation:
+</p>
+
+<p style="margin-bottom: 0;">
+<a href="https://yourwebsite.com/docs" style="color: #2563EB; text-decoration: none; font-weight: 500;">
+📚 View Complete Documentation →
+</a>
+</p>
+"""

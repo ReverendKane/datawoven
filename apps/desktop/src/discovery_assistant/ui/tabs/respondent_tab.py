@@ -56,8 +56,9 @@ class _StackedLabelForm(QtWidgets.QVBoxLayout):
 # ===============----->>
 
 class RespondentTab(QtWidgets.QWidget):
-    def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
+    def __init__(self, parent: QtWidgets.QWidget | None = None, policy_enforcer=None) -> None:
         super().__init__(parent)
+        self._policy_enforcer = policy_enforcer
         _LOGGER.info("RespondentTab initialized")
 
         # ---- OUTER SCROLL AREA (child of this tab) ----
@@ -137,35 +138,41 @@ class RespondentTab(QtWidgets.QWidget):
         # ---- FORM ----
         form = _StackedLabelForm(card)
 
+        # Full Name field
         full_name = QtWidgets.QLineEdit()
-        full_name.setPlaceholderText("e.g., Dana Rivera")  # Keep this - it's just example text
+        full_name.setPlaceholderText("e.g., Dana Rivera")
         full_name.setObjectName("fullName")
         _force_dark_text(full_name)
+        self._apply_field_policy(full_name, "Full Name")
         form.add_row("Full Name", full_name)
 
         work_email = QtWidgets.QLineEdit()
-        work_email.setPlaceholderText("dana@company.com")  # Keep this - it's just example text
+        work_email.setPlaceholderText("dana@company.com")
         work_email.setObjectName("workEmail")
         _force_dark_text(work_email)
+        self._apply_field_policy(work_email, "Work Email")
         form.add_row("Work Email", work_email)
 
         dept = QtWidgets.QLineEdit()
-        dept.setPlaceholderText("e.g., Support")  # Keep this - it's just example text
+        dept.setPlaceholderText("e.g., Support")
         dept.setObjectName("department")
         _force_dark_text(dept)
+        self._apply_field_policy(dept, "Department")
         form.add_row("Department", dept)
 
         role = QtWidgets.QLineEdit()
-        role.setPlaceholderText("Customer Support Lead")  # Keep this - it's just example text
+        role.setPlaceholderText("Customer Support Lead")
         role.setObjectName("roleTitle")
         _force_dark_text(role)
+        self._apply_field_policy(role, "Role / Title")
         form.add_row("Role / Title", role)
 
         responsibilities = QtWidgets.QTextEdit()
-        responsibilities.setPlaceholderText("Summarize duties & metrics")  # Keep this - it's just example text
+        responsibilities.setPlaceholderText("Summarize duties & metrics")
         responsibilities.setObjectName("primaryResponsibilities")
         responsibilities.setMinimumHeight(140)
         _force_dark_text(responsibilities)
+        self._apply_field_policy(responsibilities, "Primary Responsibilities")
         form.add_row("Primary Responsibilities", responsibilities)
 
         card_layout.addLayout(form)
@@ -350,3 +357,25 @@ class RespondentTab(QtWidgets.QWidget):
         sb.style().unpolish(sb)
         sb.style().polish(sb)
         sb.update()
+
+    def _apply_field_policy(self, widget: QtWidgets.QWidget, field_name: str) -> None:
+        """Apply policy governance to a field widget"""
+        if not self._policy_enforcer or not self._policy_enforcer.has_policy():
+            return
+
+        section_name = "Respondent Info"
+
+        # Check if field is enabled
+        if not self._policy_enforcer.is_field_enabled(section_name, field_name):
+            widget.setEnabled(False)
+            widget.setStyleSheet(widget.styleSheet() + """
+                QLineEdit:disabled, QTextEdit:disabled {
+                    background: #F3F4F6;
+                    color: #9CA3AF;
+                    border: 1px solid #E5E7EB;
+                }
+            """)
+            widget.setToolTip(
+                f"This field has been disabled by your organization's discovery policy.\n"
+                f"This configuration was set by your administrator."
+            )

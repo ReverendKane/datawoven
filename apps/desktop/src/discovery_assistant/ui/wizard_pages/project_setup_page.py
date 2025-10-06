@@ -1,8 +1,3 @@
-"""
-Project Setup Page - Step 2 of Admin Setup Wizard
-Collects basic organizational information and project configuration.
-"""
-
 import re
 from typing import Dict, Any, Tuple
 from PySide6 import QtWidgets, QtCore, QtGui
@@ -10,9 +5,10 @@ from discovery_assistant.wizard_base import WizardPage
 from discovery_assistant.ui.widgets.styled_checkbox import StyledCheckBox
 
 class ProjectSetupPage(WizardPage):
+
     """
-    Step 2: Project Setup page for collecting organizational context and project configuration.
-    Matches the styling and architecture of existing wizard pages.
+    Project Setup Page - Step 2 of Admin Setup Wizard
+    Collects basic organizational information and project configuration.
     """
 
     def __init__(self, parent=None):
@@ -24,7 +20,6 @@ class ProjectSetupPage(WizardPage):
         self._validate_form()
 
     def _setup_ui(self):
-        """Set up the user interface components matching established patterns."""
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(40, 30, 40, 30)
         layout.setSpacing(20)
@@ -38,7 +33,6 @@ class ProjectSetupPage(WizardPage):
         layout.addWidget(content_widget, 1)
 
     def _create_header(self) -> QtWidgets.QVBoxLayout:
-        """Create page header with title and description."""
         layout = QtWidgets.QVBoxLayout()
 
         # Title
@@ -78,7 +72,6 @@ class ProjectSetupPage(WizardPage):
         return layout
 
     def _create_content_area(self) -> QtWidgets.QWidget:
-        """Create the main content area with form sections."""
         widget = QtWidgets.QWidget()
         layout = QtWidgets.QVBoxLayout(widget)
 
@@ -106,7 +99,6 @@ class ProjectSetupPage(WizardPage):
         return widget
 
     def _create_organization_section(self) -> QtWidgets.QGroupBox:
-        """Create organization information section."""
         group = QtWidgets.QGroupBox("Organization Information")
         group.setObjectName("orgGroup")
         layout = QtWidgets.QVBoxLayout(group)
@@ -122,7 +114,7 @@ class ProjectSetupPage(WizardPage):
         self.org_name_input.setPlaceholderText("Enter your organization or company name")
         layout.addWidget(self.org_name_input)
 
-        layout.addSpacing(12)  # Space between field groups
+        layout.addSpacing(12)
 
         # Project description (optional)
         desc_label = QtWidgets.QLabel("Project Description")
@@ -139,7 +131,6 @@ class ProjectSetupPage(WizardPage):
         return group
 
     def _create_administrator_section(self) -> QtWidgets.QGroupBox:
-        """Create administrator contact section."""
         group = QtWidgets.QGroupBox("Administrator Contact")
         group.setObjectName("adminGroup")
         layout = QtWidgets.QVBoxLayout(group)
@@ -155,7 +146,7 @@ class ProjectSetupPage(WizardPage):
         self.admin_name_input.setPlaceholderText("Full name of the administrator")
         layout.addWidget(self.admin_name_input)
 
-        layout.addSpacing(12)  # Space between field groups
+        layout.addSpacing(12)
 
         # Administrator email (required)
         admin_email_label = QtWidgets.QLabel("Administrator Email *")
@@ -171,7 +162,7 @@ class ProjectSetupPage(WizardPage):
         self.email_status_label.setFixedHeight(20)
         layout.addWidget(self.email_status_label)
 
-        layout.addSpacing(8)  # Small space before note
+        layout.addSpacing(8)
 
         # Contact note
         contact_note = QtWidgets.QLabel("This contact information will be displayed to respondents for support.")
@@ -183,19 +174,18 @@ class ProjectSetupPage(WizardPage):
         return group
 
     def _create_project_section(self) -> QtWidgets.QGroupBox:
-        """Create project configuration section."""
         group = QtWidgets.QGroupBox("Project Configuration")
         group.setObjectName("projectGroup")
         layout = QtWidgets.QVBoxLayout(group)
-        layout.setContentsMargins(18, 15, 18, 15)  # Match title left margin
+        layout.setContentsMargins(18, 15, 18, 15)
         layout.setSpacing(15)
 
         # Timeline checkbox
         self.timeline_checkbox = StyledCheckBox(
             "Set completion timeline for this project",
-            bg_color="#666666",  # unchecked background
-            bg_color_checked="#000000",  # checked background
-            indicator_size=16  # or whatever size you want
+            bg_color="#666666",
+            bg_color_checked="#000000",
+            indicator_size=16
         )
         layout.addWidget(self.timeline_checkbox)
 
@@ -234,7 +224,6 @@ class ProjectSetupPage(WizardPage):
         return group
 
     def _apply_group_style(self, group: QtWidgets.QGroupBox):
-        """Apply consistent styling to group boxes."""
         group.setStyleSheet("""
             QGroupBox {
                 font-weight: 500;
@@ -255,7 +244,6 @@ class ProjectSetupPage(WizardPage):
         """)
 
     def _connect_signals(self):
-        """Connect UI signals for real-time validation."""
         # Form validation triggers
         self.org_name_input.textChanged.connect(self._validate_form)
         self.admin_name_input.textChanged.connect(self._validate_form)
@@ -265,7 +253,6 @@ class ProjectSetupPage(WizardPage):
         self.timeline_checkbox.toggled.connect(self._toggle_timeline)
 
     def _validate_email(self):
-        """Validate email format and update status indicator."""
         email = self.admin_email_input.text().strip()
 
         if not email:
@@ -286,11 +273,9 @@ class ProjectSetupPage(WizardPage):
         self._validate_form()
 
     def _toggle_timeline(self, checked: bool):
-        """Toggle visibility of timeline date picker."""
         self.timeline_widget.setVisible(checked)
 
     def _validate_form(self):
-        """Validate all required form fields."""
         org_name = self.org_name_input.text().strip()
         admin_name = self.admin_name_input.text().strip()
         admin_email = self.admin_email_input.text().strip()
@@ -308,12 +293,10 @@ class ProjectSetupPage(WizardPage):
         self.canProceed.emit(can_proceed)
 
     def showEvent(self, event):
-        """Handle page show event to apply input styling."""
         super().showEvent(event)
         self._apply_input_styles()
 
     def _apply_input_styles(self):
-        """Apply styling to form inputs with minimal custom heights."""
         input_style = """
             QLineEdit {
                 background-color: #404040;
@@ -342,7 +325,6 @@ class ProjectSetupPage(WizardPage):
         """
         self.setStyleSheet(self.styleSheet() + input_style)
 
-    # WizardPage interface implementation
     def validate_page(self) -> Tuple[bool, str]:
         """Validate the page data."""
         org_name = self.org_name_input.text().strip()

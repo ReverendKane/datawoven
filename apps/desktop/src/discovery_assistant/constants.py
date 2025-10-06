@@ -20,6 +20,7 @@ FRMT_LOG_LONG = "[%(name)s][%(levelname)s] >> %(message)s (%(asctime)s; %(filena
 
 # Form Sections
 SECTIONS = {
+    "Instructions": "instructions_tab.py",
     "Respondent": "respondent_tab.py",
     "Org Map": "org_tab.py",
     "Processes": "processes_tab.py",

@@ -118,6 +118,46 @@ def policy_installed_and_valid() -> bool:
     return True  # TEMP while wiring up
 
 
+def load_installed_policy() -> dict | None:
+    """
+    Load and parse the installed policy file.
+    Returns the parsed policy dict, or None if load fails.
+    """
+    import json
+
+    pol_path = canonical_policy_path()
+    if not pol_path.exists():
+        logging.warning("No policy file found at canonical path")
+        return None
+
+    try:
+        policy_json = pol_path.read_text(encoding='utf-8')
+        policy_data = json.loads(policy_json)
+
+        # Basic validation - check for required structure
+        if 'meta' not in policy_data:
+            logging.error("Policy missing 'meta' section")
+            return None
+
+        if 'data' not in policy_data:
+            logging.error("Policy missing 'data' section")
+            return None
+
+        if 'sections' not in policy_data['data']:
+            logging.error("Policy missing 'data.sections'")
+            return None
+
+        logging.info(f"Policy loaded successfully. Version: {policy_data.get('meta', {}).get('version', 'unknown')}")
+        return policy_data
+
+    except json.JSONDecodeError as e:
+        logging.error(f"Failed to parse policy JSON: {e}")
+        return None
+    except Exception as e:
+        logging.error(f"Failed to load policy: {e}")
+        return None
+
+
 def install_policy_from(src_path: str) -> tuple[bool, str]:
     """Copy dropped file to canonical path, keep a .bak, set read-only."""
     try:
@@ -153,6 +193,23 @@ def bootstrap_override_active() -> bool:
     return bool(mods & QtCore.Qt.ShiftModifier)
 
 
+def _get_critical_messages(policy_data: dict | None) -> list:
+    """Extract critical priority messages from policy"""
+    if not policy_data:
+        return []
+
+    admin_instructions = policy_data.get("data", {}).get("administrative_instructions", {})
+    messages = admin_instructions.get("messages", [])
+
+    # Filter for critical messages only
+    critical = [msg for msg in messages if msg.get("priority") == "critical"]
+
+    # Sort by priority_rank
+    critical.sort(key=lambda m: m.get("priority_rank", 999))
+
+    return critical
+
+
 # -------- Launchers --------
 def launch_main_window(app: QtWidgets.QApplication) -> None:
     # If already created, focus it
@@ -162,11 +219,35 @@ def launch_main_window(app: QtWidgets.QApplication) -> None:
         existing.activateWindow()
         return
 
-    win = MainWindow()
-    win.setWindowTitle(f"{APP_NAME} [{DISPLAY_VERSION}]")
-    win.setWindowIcon(QtGui.QIcon(str(constants.ICON_PATH)))  # global icon already set, but safe
+    # Load the installed policy
+    policy_data = load_installed_policy()
+    if policy_data is None:
+        # No valid policy - this shouldn't happen in normal flow, but handle gracefully
+        QtWidgets.QMessageBox.warning(
+            None,
+            "Policy Error",
+            "Could not load governance policy. The application may not function correctly."
+        )
 
-    # Size & center (keep your existing sizing logic if you have one)
+    # NEW: Check for critical messages and show modal if needed
+    critical_messages = _get_critical_messages(policy_data)
+    if critical_messages:
+        from discovery_assistant.ui.widgets.critical_message_dialog import CriticalMessageDialog
+
+        dialog = CriticalMessageDialog(critical_messages)
+        result = dialog.exec()
+
+        if result != QtWidgets.QDialog.Accepted:
+            # User somehow bypassed (shouldn't happen) - don't launch
+            logging.warning("Critical messages not acknowledged, aborting launch")
+            return
+
+    # Create main window with policy
+    win = MainWindow(policy=policy_data)
+    win.setWindowTitle(f"{APP_NAME} [{DISPLAY_VERSION}]")
+    win.setWindowIcon(QtGui.QIcon(str(constants.ICON_PATH)))
+
+    # Size & center (keep your existing sizing logic)
     screen = app.primaryScreen()
     avail = screen.availableGeometry()
     target_w = max(960, min(int(avail.width() * 0.75), 1440))

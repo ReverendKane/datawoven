@@ -4,7 +4,7 @@ from typing import Dict, Any, Optional
 from PySide6 import QtWidgets, QtCore, QtGui
 from discovery_assistant.wizard_base import WizardPage
 from discovery_assistant.ui.wizard_pages.project_setup_page import ProjectSetupPage
-
+from discovery_assistant.policy_utils import normalize_field_key, normalize_section_key
 
 class ResizableStackedWidget(QtWidgets.QStackedWidget):
     """QStackedWidget that resizes to fit the current page instead of the largest page"""
@@ -509,21 +509,24 @@ class AdminSetupWizard(QtWidgets.QDialog):
             )
 
     def _build_policy_from_wizard_data(self) -> Dict[str, Any]:
-        """Convert wizard data into policy structure"""
+        """Convert wizard data into production-grade policy structure with nested field groups"""
+        from discovery_assistant.ui.wizard_pages.consolidated_field_section_page import ConsolidatedFieldSectionPage
+
         # Get data from wizard steps
         project_data = self.wizard_data.get("step_2", {})
         sources_data = self.wizard_data.get("step_3", {})
         consolidated_data = self.wizard_data.get("step_4", {})
-        instructions_data = self.wizard_data.get("step_5", {})
-        privacy_data = self.wizard_data.get("step_6", {})
+        instructions_data = self.wizard_data.get("step_6", {})  # Changed from step_5 to step_6
+        privacy_data = self.wizard_data.get("step_7", {})  # Changed from step_6 to step_7
 
         policy = {
             "meta": {
-                "project_name": "Discovery Assistant Policy",
+                "project_name": project_data.get("organization_name", "Discovery Assistant Policy"),
                 "version": 1,
                 "generated_by_wizard": True,
                 "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
-                "immutable": True
+                "immutable": True,
+                "multi_user_mode": instructions_data.get("multi_user_mode", True)  # NEW
             },
             "data": {
                 # Project setup information
@@ -542,19 +545,17 @@ class AdminSetupWizard(QtWidgets.QDialog):
                     "admin_defined": sources_data.get("data_sources", [])
                 },
 
-                # Section configuration
-                "sections": self._build_sections_config(consolidated_data),
-
-                # Field configuration
-                "field_configuration": self._build_field_config(consolidated_data),
+                # Section configuration with nested field groups
+                "sections": self._build_sections_with_fields(consolidated_data),
 
                 # Admin instructions
                 "administrative_instructions": {
                     "enabled": len(instructions_data.get("messages", [])) > 0,
+                    "instruction_tone": instructions_data.get("instruction_tone", "formal"),  # NEW
                     "messages": instructions_data.get("messages", [])
                 },
 
-                # AI Configuration (from step 6)
+                # AI Configuration (from step 7)
                 "ai_configuration": privacy_data.get("ai_configuration", {
                     "enabled": True,
                     "initial_credits": 50.0,
@@ -563,7 +564,7 @@ class AdminSetupWizard(QtWidgets.QDialog):
                     "depletion_policy": "pause"
                 }),
 
-                # Service Engagement (from step 6)
+                # Service Engagement (from step 7)
                 "service_engagement": privacy_data.get("service_engagement", {
                     "interested": "no",
                     "contact_email": "",
@@ -571,60 +572,116 @@ class AdminSetupWizard(QtWidgets.QDialog):
                     "company_size": ""
                 }),
 
-                # Privacy settings (from step 6) - merged with existing defaults
+                # Privacy settings (from step 7)
                 "privacy": {
-                    "allow_screenshots": {"value": True},  # Keep existing
+                    "allow_screenshots": {"value": True},
                     "anonymize_respondent": {
-                        "value": privacy_data.get("privacy", {}).get("anonymize_respondents", False)},
+                        "value": privacy_data.get("privacy", {}).get("anonymize_respondents", False)
+                    },
                     "excluded_terms": privacy_data.get("privacy", {}).get("excluded_terms", [])
                 },
 
-                # Export settings (keep existing defaults)
+                # Export settings
                 "export": {
                     "format": {"value": "pdf"},
                     "include_attachments": {"value": True}
                 },
 
-                # Keep this for compatibility
+                # AI Advisor compatibility flag
                 "ai_advisor_enabled": {"value": True}
             }
         }
 
         return policy
 
-    def _build_sections_config(self, consolidated_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Build section configuration from consolidated page data"""
-        sections_config = {}
-        sections_data = consolidated_data.get("sections", {})
+    def _build_sections_with_fields(self, consolidated_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Build production-grade section configuration with nested field groups.
+        Structure: sections -> field_groups -> fields
 
-        for section_name, section_info in sections_data.items():
-            policy_key = section_name.lower().replace(" ", "_")
+        This preserves the logical grouping from the UI while maintaining clean key names.
+        """
+        from discovery_assistant.ui.wizard_pages.consolidated_field_section_page import ConsolidatedFieldSectionPage
+
+        # Get the section definitions from the consolidated page
+        temp_page = ConsolidatedFieldSectionPage()
+        section_definitions = {**temp_page.sections["core_sections"], **temp_page.sections["optional_sections"]}
+
+        sections_data = consolidated_data.get("sections", {})
+        field_states = consolidated_data.get("field_groups", {})
+
+        sections_config = {}
+
+        for section_name, section_enabled_data in sections_data.items():
+            # Convert display name to policy key using shared utility
+            policy_key = normalize_section_key(section_name)
+
+            # Get the section definition to access field group structure
+            section_def = section_definitions.get(section_name, {})
+
             sections_config[policy_key] = {
-                "enabled": section_info.get("enabled", False),
-                "required": section_info.get("required", False),
-                "configurable": not section_info.get("required", False)
+                "enabled": section_enabled_data.get("enabled", False),
+                "required": section_enabled_data.get("required", False),
+                "configurable": not section_enabled_data.get("required", False),
+                "field_groups": {}
             }
+
+            # Process field groups for this section
+            field_groups = section_def.get("fields", [])
+            for field_group_def in field_groups:
+                group_name = field_group_def.get("group", "")
+                group_required = field_group_def.get("required", False)
+                field_names = field_group_def.get("names", [])
+
+                # Initialize field group in policy
+                sections_config[policy_key]["field_groups"][group_name] = {
+                    "required": group_required,
+                    "fields": {}
+                }
+
+                # Process each field in the group
+                for field_display_name in field_names:
+                    # Normalize field display name using shared utility
+                    field_key = normalize_field_key(field_display_name)
+
+                    # Build the full field state key as it appears in field_states
+                    full_field_key = f"{policy_key}_{field_key}"
+
+                    # Get the enabled state from collected data
+                    field_enabled = field_states.get(full_field_key, True)
+
+                    # Store in policy structure
+                    sections_config[policy_key]["field_groups"][group_name]["fields"][field_key] = {
+                        "enabled": field_enabled,
+                        "required": group_required,
+                        "display_name": field_display_name
+                    }
+
         return sections_config
 
-    def _build_field_config(self, consolidated_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Build field configuration from consolidated page data"""
-        field_config = {}
-        field_groups = consolidated_data.get("field_groups", {})
+    def _normalize_field_key(self, field_name: str) -> str:
+        """
+        Convert field display names to consistent policy keys.
 
-        for field_key, enabled in field_groups.items():
-            if "_" in field_key:
-                parts = field_key.split("_", 1)
-                section_key = parts[0]
-                field_name = parts[1]
+        Examples:
+            "Full Name" -> "full_name"
+            "Role / Title" -> "role_title"
+            "Screenshots/Attachments" -> "screenshots_attachments"
+        """
+        # Replace common separators with underscores
+        normalized = field_name.lower()
+        normalized = normalized.replace(" / ", "_")
+        normalized = normalized.replace("/", "_")
+        normalized = normalized.replace(" ", "_")
 
-                if section_key not in field_config:
-                    field_config[section_key] = {}
+        # Remove any duplicate underscores that might have been created
+        while "__" in normalized:
+            normalized = normalized.replace("__", "_")
 
-                field_config[section_key][field_name] = {
-                    "enabled": enabled,
-                    "admin_controlled": True
-                }
-        return field_config
+        # Remove leading/trailing underscores
+        normalized = normalized.strip("_")
+
+        return normalized
 
     def _save_policy(self, policy: Dict[str, Any]):
         """Save policy to the canonical location"""

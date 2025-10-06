@@ -20,9 +20,9 @@ class BootstrapSplash(QtWidgets.QWidget):
             QLabel#subtitle { color: #9CA3AF; font-size: 14px; }
             QLineEdit#pwd { background:#111; color:#fff; border:1px solid #333;
                             border-radius:8px; padding:10px; }
-            QPushButton#admin { background:#1F2937; color:#fff; border:1px solid #374151;
+            QPushButton#admin { background:#1A415E; color:#fff; border:1px solid #374151;
                                 border-radius:10px; padding:10px 14px; }
-            QPushButton#admin:hover { background:#374151; }
+            QPushButton#admin:hover { background:#0BE5F5; color:#000; }
         """)
 
         outer = QtWidgets.QVBoxLayout(self)

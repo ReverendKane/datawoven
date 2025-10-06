@@ -88,7 +88,7 @@ class ReviewGeneratePage(WizardPage):
         self.sources_section = self._create_review_section("Data Sources", 3)
         layout.addWidget(self.sources_section)
 
-        self.sections_section = self._create_review_section("Section & Field Configuration", 4)
+        self.sections_section = self._create_review_section("Section && Field Configuration", 4)
         layout.addWidget(self.sections_section)
 
         self.instructions_section = self._create_review_section("Administrative Instructions", 5)
@@ -105,37 +105,52 @@ class ReviewGeneratePage(WizardPage):
         """Create a collapsible review section for a wizard step"""
         group = QtWidgets.QGroupBox(title)
         layout = QtWidgets.QVBoxLayout(group)
-        layout.setContentsMargins(18, 15, 18, 15)
-        layout.setSpacing(10)
+        layout.setContentsMargins(18, 7, 18, 18)
+        layout.setSpacing(0)
         self._apply_group_style(group)
 
-        # Header with edit button only (no checkmark)
-        header_layout = QtWidgets.QHBoxLayout()
-        header_layout.addStretch()
+        # Container widget with gray background that holds both content and button
+        content_container = QtWidgets.QWidget()
+        content_container.setObjectName("contentContainer")
+        content_container.setStyleSheet("""
+            #contentContainer {
+                background-color: #2A2A2A;
+                border-radius: 6px;
+            }
+        """)
 
-        edit_btn = QtWidgets.QPushButton("Edit")
-        edit_btn.setObjectName("editBtn")
-        edit_btn.setCursor(QtCore.Qt.PointingHandCursor)
-        edit_btn.clicked.connect(lambda: self._navigate_to_step(step_number))
-        header_layout.addWidget(edit_btn)
+        # Horizontal layout inside the gray container
+        container_layout = QtWidgets.QHBoxLayout(content_container)
+        container_layout.setContentsMargins(20, 20, 20, 20)
+        container_layout.setSpacing(15)
 
-        layout.addLayout(header_layout)
-
-        # Content area (will be populated with actual data)
+        # Content label - expands to fill available space
         content_label = QtWidgets.QLabel("Configuration details will appear here")
         content_label.setObjectName("sectionContent")
         content_label.setWordWrap(True)
+        content_label.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Preferred)
         content_label.setStyleSheet("""
             #sectionContent {
                 color: #D1D5DB;
                 font-size: 13px;
                 line-height: 1.6;
-                padding: 10px;
-                background-color: #2A2A2A;
-                border-radius: 6px;
+                background: transparent;
+                border: none;
             }
         """)
-        layout.addWidget(content_label)
+        container_layout.addWidget(content_label)
+
+        # Edit button inside the gray container
+        edit_btn = QtWidgets.QPushButton("Edit")
+        edit_btn.setObjectName("editBtn")
+        edit_btn.setFixedSize(60, 35)
+        edit_btn.setCursor(QtCore.Qt.PointingHandCursor)
+        edit_btn.clicked.connect(lambda: self._navigate_to_step(step_number))
+
+        container_layout.addWidget(edit_btn, 0, QtCore.Qt.AlignTop)
+
+        # Add the container to the main layout
+        layout.addWidget(content_container)
 
         # Store reference to content label for updates
         group.setProperty("contentLabel", content_label)
@@ -227,9 +242,13 @@ class ReviewGeneratePage(WizardPage):
         admin_email = project_data.get("administrator_email", "Not specified")
         lines.append(f"<b>Contact Email:</b> {admin_email}")
 
-        session_desc = project_data.get("session_description", "")
-        if session_desc:
-            lines.append(f"<b>Session Description:</b> {session_desc[:100]}...")
+        project_desc = project_data.get("project_description", "")
+        if project_desc:
+            lines.append(f"<b>Project Description:</b> {project_desc[:100]}...")
+
+        org_context = project_data.get("organizational_context", "")
+        if org_context:
+            lines.append(f"<b>Organizational Context:</b> {org_context[:100]}...")
 
         has_timeline = project_data.get("has_timeline", False)
         if has_timeline:
@@ -251,43 +270,102 @@ class ReviewGeneratePage(WizardPage):
         lines = [f"<b>Total Data Sources:</b> {count}"]
         lines.append("")
 
-        for i, source in enumerate(sources[:5], 1):  # Show first 5
+        for i, source in enumerate(sources, 1):
             source_name = source.get("name", "Unknown")
-            source_type = source.get("type", "unknown")
-            lines.append(f"{i}. {source_name} ({source_type})")
+            source_category = source.get("category", "other")
+            source_description = source.get("description", "")
 
-        if count > 5:
-            lines.append(f"<i>... and {count - 5} more</i>")
+            # Get display name for category
+            from discovery_assistant.ui.modals.data_source_modal import DataSource
+            category_display = next((disp for key, disp in DataSource.CATEGORIES if key == source_category),
+                                    source_category)
+
+            lines.append(f"<b>{i}. {source_name}</b> ({category_display})")
+            if source_description:
+                lines.append(f"   {source_description}")
+            lines.append("")  # Blank line between entries
 
         return "<br>".join(lines)
 
     def _format_sections_summary(self, consolidated_data: Dict[str, Any]) -> str:
         """Format section and field configuration summary"""
         summary = consolidated_data.get("summary", {})
+        sections = consolidated_data.get("sections", {})
+        field_groups = consolidated_data.get("field_groups", {})
 
         enabled_sections = summary.get("enabled_sections", 0)
         total_sections = summary.get("total_sections", 0)
         enabled_fields = summary.get("enabled_field_groups", 0)
         total_fields = summary.get("total_field_groups", 0)
 
-        lines = [
-            f"<b>Sections Enabled:</b> {enabled_sections} of {total_sections}",
-            f"<b>Field Groups Enabled:</b> {enabled_fields} of {total_fields}"
-        ]
+        # Build HTML with proper structure
+        html_parts = []
+        html_parts.append(f"<b>Sections Enabled:</b> {enabled_sections} of {total_sections}<br>")
+        html_parts.append(f"<b>Field Groups Enabled:</b> {enabled_fields} of {total_fields}<br><br><br><br>")
 
-        # List enabled sections
-        sections = consolidated_data.get("sections", {})
-        enabled_list = [name for name, info in sections.items() if info.get("enabled", False)]
+        # # Add horizontal separator line with constrained width
+        # html_parts.append(
+        #     "<div style='width: 235px;'><hr style='border: none; border-top: 1px solid #FFFFFF; margin: 3px 0 5px 0;'></div>")
+        #
+        # Map section names to their field prefixes
+        section_prefix_map = {
+            "Respondent Info": "respondent",
+            "Org Map": "org_map",
+            "Processes": "processes",
+            "Pain Points": "pain_points",
+            "Data Sources": "data_sources",
+            "Compliance": "compliance",
+            "Feature Ideas": "feature_ideas",
+            "Reference Library": "reference_library",
+            "Time & Resource Management": "time_resource"
+        }
 
-        if enabled_list:
-            lines.append("")
-            lines.append("<b>Enabled Sections:</b>")
-            for section_name in enabled_list[:8]:  # Show first 8
-                lines.append(f"• {section_name}")
-            if len(enabled_list) > 8:
-                lines.append(f"<i>... and {len(enabled_list) - 8} more</i>")
+        # Group disabled fields by section prefix
+        disabled_by_section = {}
+        for field_key, is_enabled in field_groups.items():
+            if not is_enabled and "_" in field_key:
+                section_prefix = field_key.split("_", 1)[0]
+                # Handle multi-word prefixes like "pain_points"
+                if section_prefix in ["pain", "org", "data", "feature", "reference", "time"]:
+                    parts = field_key.split("_")
+                    if len(parts) >= 3:
+                        section_prefix = f"{parts[0]}_{parts[1]}"
+                        field_name = "_".join(parts[2:]).replace("_", " ").title()
+                    else:
+                        field_name = field_key.split("_", 1)[1].replace("_", " ").title()
+                else:
+                    field_name = field_key.split("_", 1)[1].replace("_", " ").title()
 
-        return "<br>".join(lines)
+                if section_prefix not in disabled_by_section:
+                    disabled_by_section[section_prefix] = []
+                disabled_by_section[section_prefix].append(field_name)
+
+        # Display each section with its status and disabled fields together
+        for section_name, section_info in sections.items():
+            is_enabled = section_info.get("enabled", False)
+            is_required = section_info.get("required", False)
+
+            # Section header with status in parentheses
+            if is_required:
+                status_text = "<span style='color: #0BE5F5;'>REQUIRED</span>"
+            elif is_enabled:
+                status_text = "Enabled"
+            else:
+                status_text = "<span style='color: #6B7280;'>Disabled</span>"
+
+            html_parts.append(f"<b>{section_name}</b> ({status_text})<br>")
+
+            # If section is enabled, show any disabled fields with indent and tight spacing
+            if is_enabled:
+                section_prefix = section_prefix_map.get(section_name, section_name.lower().replace(" ", "_"))
+                if section_prefix in disabled_by_section:
+                    for field_name in disabled_by_section[section_prefix]:
+                        html_parts.append(
+                            f"<span style='color: #EF4444;'>&nbsp;&nbsp;&nbsp;&nbsp;- {field_name} [disabled]</span><br>")
+
+            html_parts.append("<br>")  # Extra spacing between sections
+
+        return "".join(html_parts)
 
     def _format_instructions_summary(self, instructions_data: Dict[str, Any]) -> str:
         """Format administrative instructions summary"""
@@ -298,22 +376,44 @@ class ReviewGeneratePage(WizardPage):
             return "No administrative instructions configured"
 
         critical_count = sum(1 for m in messages if m.get("priority") == "critical")
+        important_count = sum(1 for m in messages if m.get("priority") == "important")
+        info_count = sum(1 for m in messages if m.get("priority") == "informational")
 
         lines = [
             f"<b>Total Messages:</b> {count}",
-            f"<b>Critical Messages:</b> {critical_count}"
+            f"<b>Must Acknowledge (Critical):</b> {critical_count}",
+            f"<b>Should Read (Important):</b> {important_count}",
+            f"<b>Reference Only (Informational):</b> {info_count}",
+            ""
         ]
 
         if messages:
-            lines.append("")
-            lines.append("<b>Messages:</b>")
-            for i, msg in enumerate(messages[:3], 1):
+            lines.append("<b>Message List:</b>")
+            for i, msg in enumerate(messages, 1):
                 title = msg.get("title", "Untitled")
                 msg_type = msg.get("type", "reminder")
-                lines.append(f"{i}. {title} ({msg_type})")
+                priority = msg.get("priority", "informational")
 
-            if count > 3:
-                lines.append(f"<i>... and {count - 3} more</i>")
+                # Format type display
+                type_map = {
+                    "security_warning": "Security Warning",
+                    "requirement": "Process Requirement",
+                    "guideline": "Data Guideline",
+                    "steps": "Step-by-Step Instructions",
+                    "reminder": "General Reminder"
+                }
+                type_display = type_map.get(msg_type, msg_type)
+
+                # Priority badge
+                priority_map = {
+                    "critical": "<span style='color: #EF4444;'>[CRITICAL]</span>",
+                    "important": "<span style='color: #F59E0B;'>[IMPORTANT]</span>",
+                    "informational": "<span style='color: #6B7280;'>[INFO]</span>"
+                }
+                priority_badge = priority_map.get(priority, "")
+
+                lines.append(f"{i}. <b>{title}</b> {priority_badge}")
+                lines.append(f"   <i>{type_display}</i><br>")
 
         return "<br>".join(lines)
 

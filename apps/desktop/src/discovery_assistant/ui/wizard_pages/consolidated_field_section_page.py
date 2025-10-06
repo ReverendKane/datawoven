@@ -6,7 +6,7 @@ Combines section selection and field customization in a single, intuitive interf
 from typing import Dict, Any, Tuple, List
 from PySide6 import QtWidgets, QtCore, QtGui
 from discovery_assistant.wizard_base import WizardPage
-
+from discovery_assistant.policy_utils import normalize_field_key, normalize_section_key
 
 class FieldToggleSwitch(QtWidgets.QWidget):
     """Custom toggle switch for section enable/disable"""
@@ -493,11 +493,12 @@ class ConsolidatedFieldSectionPage(WizardPage):
         form_layout.addSpacing(15)
 
         fields = [
-            {"name": "Full Name", "key": "full_name", "placeholder": "e.g., Dana Rivera", "required": True},
-            {"name": "Work Email", "key": "work_email", "placeholder": "dana@company.com", "required": True},
-            {"name": "Department", "key": "department", "placeholder": "e.g., Support", "required": False},
-            {"name": "Role / Title", "key": "role_title", "placeholder": "Customer Support Lead", "required": False},
-            {"name": "Primary Responsibilities", "key": "responsibilities", "placeholder": "Summarize duties & metrics", "required": False, "type": "textarea"}
+            {"name": "Full Name", "placeholder": "e.g., Dana Rivera", "required": True},
+            {"name": "Work Email", "placeholder": "dana@company.com", "required": True},
+            {"name": "Department", "placeholder": "e.g., Support", "required": False},
+            {"name": "Role / Title", "placeholder": "Customer Support Lead", "required": False},
+            {"name": "Primary Responsibilities", "placeholder": "Summarize duties & metrics", "required": False,
+             "type": "textarea"}
         ]
 
         for field_info in fields:
@@ -507,11 +508,14 @@ class ConsolidatedFieldSectionPage(WizardPage):
         return card
 
     def _create_individual_field(self, field_info):
-        field_key = f"respondent_{field_info['key']}"
-        self.field_group_states[field_key] = True
+        section_key = normalize_section_key("Respondent Info")
+        field_key = normalize_field_key(field_info["name"])
+        full_field_key = f"{section_key}_{field_key}"
+
+        self.field_group_states[full_field_key] = True
 
         field_widget = FieldGroupWidget(
-            field_key,
+            full_field_key,
             field_info["name"],
             enabled=True,
             required=field_info["required"]
@@ -611,15 +615,12 @@ class ConsolidatedFieldSectionPage(WizardPage):
         form_layout.addSpacing(15)
 
         fields = [
-            {"name": "Process Name", "key": "process_name", "placeholder": "e.g., Weekly Sales Report",
-             "required": False},
-            {"name": "Process Description", "key": "process_description", "placeholder": "Describe the steps involved",
-             "required": False, "type": "textarea"},
-            {"name": "Frequency", "key": "frequency", "placeholder": "Daily, Weekly, Monthly, etc.", "required": False},
-            {"name": "Time Investment", "key": "time_investment", "placeholder": "How long does this take?",
-             "required": False},
-            {"name": "Screenshots/Attachments", "key": "attachments", "placeholder": "Supporting documentation",
-             "required": False}
+            {"name": "Process Name", "placeholder": "e.g., Weekly Sales Report", "required": False},
+            {"name": "Process Description", "placeholder": "Describe the steps involved", "required": False,
+             "type": "textarea"},
+            {"name": "Frequency", "placeholder": "Daily, Weekly, Monthly, etc.", "required": False},
+            {"name": "Time Investment", "placeholder": "How long does this take?", "required": False},
+            {"name": "Screenshots/Attachments", "placeholder": "Supporting documentation", "required": False}
         ]
 
         for field_info in fields:
@@ -672,17 +673,14 @@ class ConsolidatedFieldSectionPage(WizardPage):
         form_layout.addSpacing(15)
 
         fields = [
-            {"name": "Feature Title", "key": "feature_title",
-             "placeholder": "e.g., Automated Email Response System", "required": True},
-            {"name": "Problem Description", "key": "problem_description",
-             "placeholder": "What specific problem does this solve?", "required": True, "type": "textarea"},
-            {"name": "Expected Outcome", "key": "expected_outcome",
-             "placeholder": "How would you know this automation is working successfully?", "required": True,
+            {"name": "Feature Title", "placeholder": "e.g., Automated Email Response System", "required": True},
+            {"name": "Problem Description", "placeholder": "What specific problem does this solve?", "required": True,
              "type": "textarea"},
-            {"name": "Implementation Steps", "key": "implementation_steps",
-             "placeholder": "Multi-step process editor with data dependency tracking", "required": False},
-            {"name": "Screenshots/Attachments", "key": "attachments",
-             "placeholder": "Supporting documentation", "required": False}
+            {"name": "Expected Outcome", "placeholder": "How would you know this automation is working successfully?",
+             "required": True, "type": "textarea"},
+            {"name": "Implementation Steps", "placeholder": "Multi-step process editor with data dependency tracking",
+             "required": False},
+            {"name": "Screenshots/Attachments", "placeholder": "Supporting documentation", "required": False}
         ]
 
         for field_info in fields:
@@ -693,11 +691,14 @@ class ConsolidatedFieldSectionPage(WizardPage):
 
     def _create_individual_field_feature_ideas(self, field_info):
         """Create individual Feature Ideas field with proper styling"""
-        field_key = f"feature_ideas_{field_info['key']}"
-        self.field_group_states[field_key] = True
+        section_key = normalize_section_key("Feature Ideas")
+        field_key = normalize_field_key(field_info["name"])
+        full_field_key = f"{section_key}_{field_key}"
+
+        self.field_group_states[full_field_key] = True
 
         field_widget = FieldGroupWidget(
-            field_key,
+            full_field_key,
             field_info["name"],
             enabled=True,
             required=field_info["required"]
@@ -756,11 +757,14 @@ class ConsolidatedFieldSectionPage(WizardPage):
         return field_widget
 
     def _create_individual_field_processes(self, field_info):
-        field_key = f"processes_{field_info['key']}"
-        self.field_group_states[field_key] = True
+        section_key = normalize_section_key("Processes")
+        field_key = normalize_field_key(field_info["name"])
+        full_field_key = f"{section_key}_{field_key}"
+
+        self.field_group_states[full_field_key] = True
 
         field_widget = FieldGroupWidget(
-            field_key,
+            full_field_key,
             field_info["name"],
             enabled=True,
             required=field_info["required"]
@@ -860,10 +864,11 @@ class ConsolidatedFieldSectionPage(WizardPage):
         form_layout.addSpacing(15)
 
         fields = [
-            {"name": "Reports To", "key": "reports_to", "placeholder": "Manager name/title", "required": False},
-            {"name": "Peer Teams", "key": "peer_teams", "placeholder": "e.g. Sales Ops, QA", "required": False},
-            {"name": "Downstream Consumers", "key": "downstream_consumers", "placeholder": "e.g., Support", "required": False},
-            {"name": "Org Notes", "key": "org_notes", "placeholder": "Key handoffs, dependencies, SLAs", "required": False, "type": "textarea"}
+            {"name": "Reports To", "placeholder": "Manager name/title", "required": False},
+            {"name": "Peer Teams", "placeholder": "e.g. Sales Ops, QA", "required": False},
+            {"name": "Downstream Consumers", "placeholder": "e.g., Support", "required": False},
+            {"name": "Org Notes", "placeholder": "Key handoffs, dependencies, SLAs", "required": False,
+             "type": "textarea"}
         ]
 
         for field_info in fields:
@@ -915,17 +920,13 @@ class ConsolidatedFieldSectionPage(WizardPage):
         form_layout.addSpacing(15)
 
         fields = [
-            {"name": "Pain Name", "key": "pain_name",
-             "placeholder": "Brief name for this pain point (e.g., Manual data entry delays)", "required": True},
-            {"name": "Impact", "key": "impact", "placeholder": "Very Low, Low, Medium, High, Very High",
+            {"name": "Pain Name", "placeholder": "Brief name for this pain point (e.g., Manual data entry delays)",
              "required": True},
-            {"name": "Frequency", "key": "frequency", "placeholder": "Randomly, Daily, Weekly, Monthly, Yearly",
-             "required": True},
-            {"name": "Notes", "key": "notes",
-             "placeholder": "Describe the issue, downstream effects, and potential workarounds...", "required": True,
-             "type": "textarea"},
-            {"name": "Screenshots/Attachments", "key": "attachments", "placeholder": "Supporting documentation",
-             "required": False}
+            {"name": "Impact", "placeholder": "Very Low, Low, Medium, High, Very High", "required": True},
+            {"name": "Frequency", "placeholder": "Randomly, Daily, Weekly, Monthly, Yearly", "required": True},
+            {"name": "Notes", "placeholder": "Describe the issue, downstream effects, and potential workarounds...",
+             "required": True, "type": "textarea"},
+            {"name": "Screenshots/Attachments", "placeholder": "Supporting documentation", "required": False}
         ]
 
         for field_info in fields:
@@ -977,15 +978,13 @@ class ConsolidatedFieldSectionPage(WizardPage):
         form_layout.addSpacing(15)
 
         fields = [
-            {"name": "Source Name", "key": "source_name",
-             "placeholder": "Descriptive name for this data source (e.g., Customer Database)", "required": True},
-            {"name": "Connection Type", "key": "connection_type",
-             "placeholder": "Database, API/Web Service, File System, Cloud Service, etc.", "required": True},
-            {"name": "Description", "key": "description",
-             "placeholder": "Describe what data this source contains and how it will be used...", "required": True,
-             "type": "textarea"},
-            {"name": "Screenshots/Attachments", "key": "attachments", "placeholder": "Supporting documentation",
-             "required": False}
+            {"name": "Source Name", "placeholder": "Descriptive name for this data source (e.g., Customer Database)",
+             "required": True},
+            {"name": "Connection Type", "placeholder": "Database, API/Web Service, File System, Cloud Service, etc.",
+             "required": True},
+            {"name": "Description", "placeholder": "Describe what data this source contains and how it will be used...",
+             "required": True, "type": "textarea"},
+            {"name": "Screenshots/Attachments", "placeholder": "Supporting documentation", "required": False}
         ]
 
         for field_info in fields:
@@ -1038,39 +1037,34 @@ class ConsolidatedFieldSectionPage(WizardPage):
 
         fields = [
             # Organization Context (Required)
-            {"name": "Industry Sector", "key": "industry",
+            {"name": "Industry Sector",
              "placeholder": "e.g., Healthcare, Financial Services, Manufacturing, Technology", "required": True},
-            {"name": "Company Size", "key": "company_size", "placeholder": "Micro, Small, Medium, Large, Enterprise",
-             "required": True},
-            {"name": "Geographic Scope", "key": "geographic_scope",
+            {"name": "Company Size", "placeholder": "Micro, Small, Medium, Large, Enterprise", "required": True},
+            {"name": "Geographic Scope",
              "placeholder": "Countries/regions where you operate (e.g., US, EU, Canada, Global)", "required": True},
-            {"name": "Business Activities", "key": "business_activities",
+            {"name": "Business Activities",
              "placeholder": "Key business activities that may trigger compliance requirements", "required": True,
              "type": "textarea"},
 
             # Individual Requirements (Required)
-            {"name": "Requirement Name", "key": "requirement_name",
-             "placeholder": "e.g., GDPR Article 32 - Security of Processing", "required": True},
-            {"name": "Authority/Regulator", "key": "authority", "placeholder": "e.g., GDPR, SEC, FDA, OSHA",
+            {"name": "Requirement Name", "placeholder": "e.g., GDPR Article 32 - Security of Processing",
              "required": True},
+            {"name": "Authority/Regulator", "placeholder": "e.g., GDPR, SEC, FDA, OSHA", "required": True},
 
             # Optional fields for admin control
-            {"name": "Data Types Handled", "key": "data_types", "placeholder": "Types of data you collect/process",
-             "required": False, "type": "textarea"},
-            {"name": "Third-Party Vendors", "key": "vendors", "placeholder": "Key vendors that may impact compliance",
-             "required": False, "type": "textarea"},
-            {"name": "Responsible Person", "key": "responsible",
-             "placeholder": "Name or role responsible for this requirement", "required": False},
-            {"name": "Evidence Required", "key": "evidence", "placeholder": "Required documentation and evidence",
-             "required": False, "type": "textarea"},
-            {"name": "Status", "key": "status", "placeholder": "Not Assessed, Compliant, Non-Compliant, In Progress",
-             "required": False},
-            {"name": "Risk Level", "key": "risk", "placeholder": "Low, Medium, High, Critical", "required": False},
-            {"name": "Notes", "key": "notes",
-             "placeholder": "Additional compliance notes, requirements, and considerations...", "required": False,
+            {"name": "Data Types Handled", "placeholder": "Types of data you collect/process", "required": False,
              "type": "textarea"},
-            {"name": "Screenshots/Attachments", "key": "attachments", "placeholder": "Supporting documentation",
-             "required": False}
+            {"name": "Third-Party Vendors", "placeholder": "Key vendors that may impact compliance", "required": False,
+             "type": "textarea"},
+            {"name": "Responsible Person", "placeholder": "Name or role responsible for this requirement",
+             "required": False},
+            {"name": "Evidence Required", "placeholder": "Required documentation and evidence", "required": False,
+             "type": "textarea"},
+            {"name": "Status", "placeholder": "Not Assessed, Compliant, Non-Compliant, In Progress", "required": False},
+            {"name": "Risk Level", "placeholder": "Low, Medium, High, Critical", "required": False},
+            {"name": "Notes", "placeholder": "Additional compliance notes, requirements, and considerations...",
+             "required": False, "type": "textarea"},
+            {"name": "Screenshots/Attachments", "placeholder": "Supporting documentation", "required": False}
         ]
 
         for field_info in fields:
@@ -1080,11 +1074,14 @@ class ConsolidatedFieldSectionPage(WizardPage):
         return card
 
     def _create_individual_field_compliance(self, field_info):
-        field_key = f"compliance_{field_info['key']}"
-        self.field_group_states[field_key] = True
+        section_key = normalize_section_key("Compliance")
+        field_key = normalize_field_key(field_info["name"])
+        full_field_key = f"{section_key}_{field_key}"
+
+        self.field_group_states[full_field_key] = True
 
         field_widget = FieldGroupWidget(
-            field_key,
+            full_field_key,
             field_info["name"],
             enabled=True,
             required=field_info["required"]
@@ -1143,11 +1140,14 @@ class ConsolidatedFieldSectionPage(WizardPage):
         return field_widget
 
     def _create_individual_field_pain_points(self, field_info):
-        field_key = f"pain_points_{field_info['key']}"
-        self.field_group_states[field_key] = True
+        section_key = normalize_section_key("Pain Points")
+        field_key = normalize_field_key(field_info["name"])
+        full_field_key = f"{section_key}_{field_key}"
+
+        self.field_group_states[full_field_key] = True
 
         field_widget = FieldGroupWidget(
-            field_key,
+            full_field_key,
             field_info["name"],
             enabled=True,
             required=field_info["required"]
@@ -1206,11 +1206,14 @@ class ConsolidatedFieldSectionPage(WizardPage):
         return field_widget
 
     def _create_individual_field_data_sources(self, field_info):
-        field_key = f"data_sources_{field_info['key']}"
-        self.field_group_states[field_key] = True
+        section_key = normalize_section_key("Data Sources")
+        field_key = normalize_field_key(field_info["name"])
+        full_field_key = f"{section_key}_{field_key}"
+
+        self.field_group_states[full_field_key] = True
 
         field_widget = FieldGroupWidget(
-            field_key,
+            full_field_key,
             field_info["name"],
             enabled=True,
             required=field_info["required"]
@@ -1269,11 +1272,14 @@ class ConsolidatedFieldSectionPage(WizardPage):
         return field_widget
 
     def _create_individual_field_org_map(self, field_info):
-        field_key = f"org_map_{field_info['key']}"
-        self.field_group_states[field_key] = True
+        section_key = normalize_section_key("Org Map")
+        field_key = normalize_field_key(field_info["name"])
+        full_field_key = f"{section_key}_{field_key}"
+
+        self.field_group_states[full_field_key] = True
 
         field_widget = FieldGroupWidget(
-            field_key,
+            full_field_key,
             field_info["name"],
             enabled=True,
             required=field_info["required"]
@@ -1373,13 +1379,10 @@ class ConsolidatedFieldSectionPage(WizardPage):
         form_layout.addSpacing(15)
 
         fields = [
-            {"name": "Title", "key": "title", "placeholder": "Process title (e.g., Client Onboarding Workflow)",
-             "required": True},
-            {"name": "Notes", "key": "notes",
-             "placeholder": "Briefly describe the steps, systems involved, and expected outcomes.", "required": True,
-             "type": "textarea"},
-            {"name": "Screenshots/Attachments", "key": "attachments", "placeholder": "Supporting documentation",
-             "required": False}
+            {"name": "Title", "placeholder": "Process title (e.g., Client Onboarding Workflow)", "required": True},
+            {"name": "Notes", "placeholder": "Briefly describe the steps, systems involved, and expected outcomes.",
+             "required": True, "type": "textarea"},
+            {"name": "Screenshots/Attachments", "placeholder": "Supporting documentation", "required": False}
         ]
 
         for field_info in fields:
@@ -1389,11 +1392,14 @@ class ConsolidatedFieldSectionPage(WizardPage):
         return card
 
     def _create_individual_field_processes(self, field_info):
-        field_key = f"processes_{field_info['key']}"
-        self.field_group_states[field_key] = True
+        section_key = normalize_section_key("Processes")
+        field_key = normalize_field_key(field_info["name"])
+        full_field_key = f"{section_key}_{field_key}"
+
+        self.field_group_states[full_field_key] = True
 
         field_widget = FieldGroupWidget(
-            field_key,
+            full_field_key,
             field_info["name"],
             enabled=True,
             required=field_info["required"]
@@ -1495,17 +1501,13 @@ class ConsolidatedFieldSectionPage(WizardPage):
         form_layout.addSpacing(15)
 
         fields = [
-            {"name": "Document Title", "key": "document_title",
-             "placeholder": "Descriptive title for this document", "required": True},
-            {"name": "File Attachment", "key": "file_attachment",
-             "placeholder": "Upload document or capture screenshot", "required": True},
-            {"name": "Category", "key": "category",
-             "placeholder": "Organizational, Process Documentation, Policies & Procedures, etc.", "required": False},
-            {"name": "Description", "key": "description",
-             "placeholder": "Brief description of the document's content and purpose", "required": False,
-             "type": "textarea"},
-            {"name": "Tags", "key": "tags",
-             "placeholder": "Keywords for organization and searchability", "required": False}
+            {"name": "Document Title", "placeholder": "Descriptive title for this document", "required": True},
+            {"name": "File Attachment", "placeholder": "Upload document or capture screenshot", "required": True},
+            {"name": "Category", "placeholder": "Organizational, Process Documentation, Policies & Procedures, etc.",
+             "required": False},
+            {"name": "Description", "placeholder": "Brief description of the document's content and purpose",
+             "required": False, "type": "textarea"},
+            {"name": "Tags", "placeholder": "Keywords for organization and searchability", "required": False}
         ]
 
         for field_info in fields:
@@ -1559,23 +1561,20 @@ class ConsolidatedFieldSectionPage(WizardPage):
 
         # Overview Analysis section (required)
         overview_fields = [
-            {"name": "Primary Activities", "key": "primary_activities",
-             "placeholder": "Describe your main work activities and responsibilities", "required": True,
-             "type": "textarea"},
-            {"name": "Peak Workload Periods", "key": "peak_workload_periods",
+            {"name": "Primary Activities", "placeholder": "Describe your main work activities and responsibilities",
+             "required": True, "type": "textarea"},
+            {"name": "Peak Workload Periods",
              "placeholder": "When is your workload most intense? (daily, weekly, monthly patterns)", "required": True,
              "type": "textarea"},
-            {"name": "Resource Constraints", "key": "resource_constraints",
+            {"name": "Resource Constraints",
              "placeholder": "What limits your productivity? (tools, information, approvals, etc.)", "required": True,
              "type": "textarea"},
-            {"name": "Waiting Time", "key": "waiting_time",
-             "placeholder": "Time spent waiting for approvals, information, responses, etc.", "required": True,
+            {"name": "Waiting Time", "placeholder": "Time spent waiting for approvals, information, responses, etc.",
+             "required": True, "type": "textarea"},
+            {"name": "Overtime Patterns", "placeholder": "When and why do you work overtime?", "required": True,
              "type": "textarea"},
-            {"name": "Overtime Patterns", "key": "overtime_patterns",
-             "placeholder": "When and why do you work overtime?", "required": True, "type": "textarea"},
-            {"name": "Additional Notes", "key": "notes",
-             "placeholder": "Any other time management or resource-related observations", "required": True,
-             "type": "textarea"}
+            {"name": "Additional Notes", "placeholder": "Any other time management or resource-related observations",
+             "required": True, "type": "textarea"}
         ]
 
         # Add section header for overview
@@ -1611,16 +1610,12 @@ class ConsolidatedFieldSectionPage(WizardPage):
         form_layout.addWidget(tracking_header)
 
         tracking_fields = [
-            {"name": "Activity Name", "key": "activity_name",
-             "placeholder": "e.g., Email processing, Report generation", "required": False},
-            {"name": "Hours per Week", "key": "hours_per_week",
-             "placeholder": "Numeric input with spinner control", "required": False},
-            {"name": "Priority Level", "key": "priority_level",
-             "placeholder": "High, Medium, Low", "required": False},
-            {"name": "Activity Notes", "key": "activity_notes",
-             "placeholder": "Additional details about this activity", "required": False, "type": "textarea"},
-            {"name": "Screenshots/Attachments", "key": "attachments",
-             "placeholder": "Supporting documentation", "required": False}
+            {"name": "Activity Name", "placeholder": "e.g., Email processing, Report generation", "required": False},
+            {"name": "Hours per Week", "placeholder": "Numeric input with spinner control", "required": False},
+            {"name": "Priority Level", "placeholder": "High, Medium, Low", "required": False},
+            {"name": "Activity Notes", "placeholder": "Additional details about this activity", "required": False,
+             "type": "textarea"},
+            {"name": "Screenshots/Attachments", "placeholder": "Supporting documentation", "required": False}
         ]
 
         for field_info in tracking_fields:
@@ -1631,11 +1626,14 @@ class ConsolidatedFieldSectionPage(WizardPage):
 
     def _create_individual_field_time_resource(self, field_info):
         """Create individual Time & Resource Management field with proper styling"""
-        field_key = f"time_resource_{field_info['key']}"
-        self.field_group_states[field_key] = True
+        section_key = normalize_section_key("Time & Resource Management")
+        field_key = normalize_field_key(field_info["name"])
+        full_field_key = f"{section_key}_{field_key}"
+
+        self.field_group_states[full_field_key] = True
 
         field_widget = FieldGroupWidget(
-            field_key,
+            full_field_key,
             field_info["name"],
             enabled=True,
             required=field_info["required"]
@@ -1695,11 +1693,14 @@ class ConsolidatedFieldSectionPage(WizardPage):
 
     def _create_individual_field_reference_library(self, field_info):
         """Create individual Reference Library field with proper styling"""
-        field_key = f"reference_library_{field_info['key']}"
-        self.field_group_states[field_key] = True
+        section_key = normalize_section_key("Reference Library")
+        field_key = normalize_field_key(field_info["name"])
+        full_field_key = f"{section_key}_{field_key}"
+
+        self.field_group_states[full_field_key] = True
 
         field_widget = FieldGroupWidget(
-            field_key,
+            full_field_key,
             field_info["name"],
             enabled=True,
             required=field_info["required"]

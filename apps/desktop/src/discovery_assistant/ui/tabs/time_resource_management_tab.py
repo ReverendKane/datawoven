@@ -254,8 +254,9 @@ class AttachmentChip(QtWidgets.QFrame):
 class TimeResourceManagementTab(QtWidgets.QWidget):
     requestScreenshot = QtCore.Signal(int)  # row index
 
-    def __init__(self, parent: Optional[QtWidgets.QWidget] = None) -> None:
+    def __init__(self, parent: Optional[QtWidgets.QWidget] = None, policy_enforcer=None) -> None:
         super().__init__(parent)
+        self._policy_enforcer = policy_enforcer
         _LOGGER.info("TimeResourceManagementTab initialized")
 
         # Internal data storage

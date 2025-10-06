@@ -56,8 +56,9 @@ class _StackedLabelForm(QtWidgets.QVBoxLayout):
 # ============----->>
 
 class OrgMapTab(QtWidgets.QWidget):
-    def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
+    def __init__(self, parent: QtWidgets.QWidget | None = None, policy_enforcer=None) -> None:
         super().__init__(parent)
+        self._policy_enforcer = policy_enforcer
         _LOGGER.info("OrgTab initialized")
 
         # ---- OUTER SCROLL AREA (child of this tab) ----
@@ -141,24 +142,28 @@ class OrgMapTab(QtWidgets.QWidget):
         reportsTo.setPlaceholderText("Manager name/title")
         reportsTo.setObjectName("reportsTo")
         _force_dark_text(reportsTo)
+        self._apply_field_policy(reportsTo, "Reports To")
         form.add_row("Reports To", reportsTo)
 
         peer_teams = QtWidgets.QLineEdit()
         peer_teams.setPlaceholderText("e.g. Sales Ops, QA")
         peer_teams.setObjectName("peerTeams")
         _force_dark_text(peer_teams)
+        self._apply_field_policy(peer_teams, "Peer Teams")
         form.add_row("Peer Teams", peer_teams)
 
         downstream_consumers = QtWidgets.QLineEdit()
         downstream_consumers.setPlaceholderText("e.g., Support")
         downstream_consumers.setObjectName("downstreamConsumers")
         _force_dark_text(downstream_consumers)
+        self._apply_field_policy(downstream_consumers, "Downstream Consumers")
         form.add_row("Downstream Consumers", downstream_consumers)
 
         org_notes = QtWidgets.QTextEdit()
         org_notes.setPlaceholderText("Key handoffs, dependencies, SLAs")
         org_notes.setObjectName("orgNotes")
         _force_dark_text(org_notes)
+        self._apply_field_policy(org_notes, "Org Notes")
         form.add_row("Org Notes", org_notes)
 
         card_layout.addLayout(form)
@@ -183,6 +188,28 @@ class OrgMapTab(QtWidgets.QWidget):
 
         # Then connect autosave signals (after loading data)
         self._connect_autosave_signals()
+
+    def _apply_field_policy(self, widget: QtWidgets.QWidget, field_name: str) -> None:
+        """Apply policy governance to a field widget"""
+        if not self._policy_enforcer or not self._policy_enforcer.has_policy():
+            return
+
+        section_name = "Org Map"
+
+        # Check if field is enabled
+        if not self._policy_enforcer.is_field_enabled(section_name, field_name):
+            widget.setEnabled(False)
+            widget.setStyleSheet(widget.styleSheet() + """
+                QLineEdit:disabled, QTextEdit:disabled {
+                    background: #F3F4F6;
+                    color: #9CA3AF;
+                    border: 1px solid #E5E7EB;
+                }
+            """)
+            widget.setToolTip(
+                f"This field has been disabled by your organization's discovery policy.\n"
+                f"This configuration was set by your administrator."
+            )
 
     def _get_section_name(self) -> str:
         return "org_map"

@@ -1268,8 +1268,9 @@ class ComplianceRequirementForm(QtWidgets.QWidget):
 class ComplianceTab(QtWidgets.QWidget):
     requestScreenshot = QtCore.Signal(int)
 
-    def __init__(self, parent: Optional[QtWidgets.QWidget] = None) -> None:
+    def __init__(self, parent: Optional[QtWidgets.QWidget] = None, policy_enforcer=None) -> None:
         super().__init__(parent)
+        self._policy_enforcer = policy_enforcer
         _LOGGER.info("ComplianceTab initialized")
 
         # ---- scroller ----

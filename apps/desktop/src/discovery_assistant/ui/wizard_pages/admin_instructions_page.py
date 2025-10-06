@@ -86,6 +86,10 @@ class AdminInstructionsPage(WizardPage):
         header_layout = self._create_header()
         layout.addLayout(header_layout)
 
+        # NEW: User mode and tone selection
+        config_section = self._create_instruction_config()
+        layout.addWidget(config_section)
+
         # Main content
         content_widget = self._create_content_area()
         layout.addWidget(content_widget, 1)
@@ -143,6 +147,70 @@ class AdminInstructionsPage(WizardPage):
         layout.addWidget(title)
         layout.addWidget(description)
         return layout
+
+    def _create_instruction_config(self) -> QtWidgets.QGroupBox:
+        """Configuration for user mode and instruction tone"""
+        group = QtWidgets.QGroupBox("Instructions Configuration")
+        layout = QtWidgets.QVBoxLayout(group)
+        layout.setContentsMargins(18, 15, 18, 15)
+        layout.setSpacing(15)
+        self._apply_group_style(group)
+
+        group.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
+
+        form = QtWidgets.QFormLayout()
+        form.setHorizontalSpacing(12)
+        form.setVerticalSpacing(12)
+
+        # User Mode Selection
+        mode_label = QtWidgets.QLabel(
+            "How will this discovery be completed?"
+        )
+        mode_label.setStyleSheet("color: #F9FAFB; font-size: 14px;")
+
+        self.user_mode_group = QtWidgets.QButtonGroup(self)
+
+        multi_user_radio = QtWidgets.QRadioButton("Multiple team members will fill this out")
+        multi_user_radio.setStyleSheet("color: #D1D5DB; font-size: 14px;")
+        multi_user_radio.setChecked(True)
+
+        solo_user_radio = QtWidgets.QRadioButton("I will fill this out myself")
+        solo_user_radio.setStyleSheet("color: #D1D5DB; font-size: 14px;")
+
+        self.user_mode_group.addButton(multi_user_radio, 1)  # id=1 for multi-user
+        self.user_mode_group.addButton(solo_user_radio, 2)  # id=2 for solo
+
+        mode_layout = QtWidgets.QVBoxLayout()
+        mode_layout.setSpacing(8)
+        mode_layout.addWidget(mode_label)
+        mode_layout.addWidget(multi_user_radio)
+        mode_layout.addWidget(solo_user_radio)
+
+        form.addRow("", mode_layout)
+
+        # Instruction Tone Selection
+        tone_label = QtWidgets.QLabel(
+            "Choose the tone for instructions:"
+        )
+        tone_label.setStyleSheet("color: #F9FAFB; font-size: 14px;")
+
+        self.tone_combo = QtWidgets.QComboBox()
+        self.tone_combo.setFixedHeight(35)
+        self.tone_combo.addItem("Formal/Professional", "formal")
+        self.tone_combo.addItem("Conversational/Friendly", "conversational")
+        self.tone_combo.addItem("Concise/Action-Oriented", "concise")
+        self.tone_combo.setCurrentIndex(0)  # Default to formal
+
+        tone_layout = QtWidgets.QVBoxLayout()
+        tone_layout.setSpacing(8)
+        tone_layout.addWidget(tone_label)
+        tone_layout.addWidget(self.tone_combo)
+
+        form.addRow("", tone_layout)
+
+        layout.addLayout(form)
+
+        return group
 
     def _create_content_area(self) -> QtWidgets.QWidget:
         widget = QtWidgets.QWidget()
@@ -692,13 +760,32 @@ class AdminInstructionsPage(WizardPage):
         return True, ""
 
     def collect_data(self) -> Dict[str, Any]:
+        # Get user mode (1=multi-user, 2=solo)
+        multi_user_mode = self.user_mode_group.checkedId() == 1
+
+        # Get tone selection
+        tone = self.tone_combo.currentData()
+
         return {
+            "multi_user_mode": multi_user_mode,
+            "instruction_tone": tone,
             "messages": [msg.to_dict() for msg in self.messages],
             "total_messages": len(self.messages),
             "critical_count": sum(1 for m in self.messages if m.priority == "critical")
         }
 
     def load_data(self, data: Dict[str, Any]) -> None:
+        # Load user mode
+        multi_user = data.get("multi_user_mode", True)
+        self.user_mode_group.button(1 if multi_user else 2).setChecked(True)
+
+        # Load tone
+        tone = data.get("instruction_tone", "formal")
+        index = self.tone_combo.findData(tone)
+        if index >= 0:
+            self.tone_combo.setCurrentIndex(index)
+
+        # Load messages
         messages_data = data.get("messages", [])
         self.messages = [AdminMessage.from_dict(m) for m in messages_data]
         self._refresh_messages_table()

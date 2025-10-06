@@ -699,8 +699,9 @@ class ImpactSlider(QtWidgets.QWidget):
 class PainPointsTab(QtWidgets.QWidget):
     requestScreenshot = QtCore.Signal(int)  # row index
 
-    def __init__(self, parent: Optional[QtWidgets.QWidget] = None) -> None:
+    def __init__(self, parent: Optional[QtWidgets.QWidget] = None, policy_enforcer=None) -> None:
         super().__init__(parent)
+        self._policy_enforcer = policy_enforcer
         _LOGGER.info("PainPointsTab initialized")
 
         # ---- scroller ----
@@ -785,14 +786,17 @@ class PainPointsTab(QtWidgets.QWidget):
         self.name_edit = QtWidgets.QLineEdit()
         self.name_edit.setPlaceholderText("Brief name for this pain point (e.g., Manual data entry delays)")
         _force_dark_text(self.name_edit)
-        form.add_row("Pain Name", self.name_edit)
+        self._apply_field_policy(self.name_edit, "Pain Point Title")
+        form.add_row("Pain Point Title", self.name_edit)
 
         # Impact slider
         self.impact_slider = ImpactSlider()
+        self._apply_field_policy(self.impact_slider, "Impact Level")
         form.add_row("Impact", self.impact_slider)
 
         # Frequency radio buttons
         self.frequency_radio = FrequencyRadioGroup()
+        self._apply_field_policy(self.frequency_radio, "Frequency")
         form.add_row("Frequency", self.frequency_radio)
 
         # Notes
@@ -800,6 +804,7 @@ class PainPointsTab(QtWidgets.QWidget):
         self.notes_edit.setPlaceholderText("Describe the issue, downstream effects, and potential workarounds...")
         self.notes_edit.setMinimumHeight(100)
         _force_dark_text(self.notes_edit)
+        self._apply_field_policy(self.notes_edit, "Description")
         form.add_row("Notes", self.notes_edit)
 
         card_layout.addWidget(form_host)
@@ -1004,6 +1009,28 @@ class PainPointsTab(QtWidgets.QWidget):
 
         # Load existing data after all UI setup is complete
         self._load_pain_points_data()
+
+    def _apply_field_policy(self, widget: QtWidgets.QWidget, field_name: str) -> None:
+        """Apply policy governance to a field widget"""
+        if not self._policy_enforcer or not self._policy_enforcer.has_policy():
+            return
+
+        section_name = "Pain Points"
+
+        if not self._policy_enforcer.is_field_enabled(section_name, field_name):
+            widget.setEnabled(False)
+            if isinstance(widget, (QtWidgets.QLineEdit, QtWidgets.QTextEdit)):
+                widget.setStyleSheet(widget.styleSheet() + """
+                    QLineEdit:disabled, QTextEdit:disabled {
+                        background: #F3F4F6;
+                        color: #9CA3AF;
+                        border: 1px solid #E5E7EB;
+                    }
+                """)
+            widget.setToolTip(
+                f"This field has been disabled by your organization's discovery policy.\n"
+                f"This configuration was set by your administrator."
+            )
 
     def _get_section_name(self) -> str:
         return "pain_points"

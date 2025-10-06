@@ -542,8 +542,9 @@ class ProcessDialog(QtWidgets.QDialog):
 class ProcessesTab(QtWidgets.QWidget):
     requestScreenshot = QtCore.Signal(int)  # row index
 
-    def __init__(self, parent: Optional[QtWidgets.QWidget] = None) -> None:
+    def __init__(self, parent: Optional[QtWidgets.QWidget] = None, policy_enforcer=None) -> None:
         super().__init__(parent)
+        self._policy_enforcer = policy_enforcer
         _LOGGER.info("ProcessesTab initialized")
 
         # ---- scroller ----
@@ -627,12 +628,14 @@ class ProcessesTab(QtWidgets.QWidget):
         self.title_edit = QtWidgets.QLineEdit()
         self.title_edit.setPlaceholderText("Process title (e.g., Client Onboarding Workflow)")
         _force_dark_text(self.title_edit)
+        self._apply_field_policy(self.title_edit, "Process Name")
         form.add_row("Title", self.title_edit)
 
         self.notes_edit = QtWidgets.QTextEdit()
         self.notes_edit.setPlaceholderText("Briefly describe the steps, systems involved, and expected outcomes.")
         self.notes_edit.setMinimumHeight(100)
         _force_dark_text(self.notes_edit)
+        self._apply_field_policy(self.notes_edit, "Process Description")
         form.add_row("Notes", self.notes_edit)
 
         card_layout.addWidget(form_host)
@@ -648,6 +651,13 @@ class ProcessesTab(QtWidgets.QWidget):
         actions_row.addWidget(self.btn_attach, 0, QtCore.Qt.AlignLeft)
         actions_row.addWidget(self.btn_capture, 0, QtCore.Qt.AlignLeft)
         actions_row.addStretch(1)
+
+        # Apply policy to attachment functionality
+        if self._policy_enforcer and not self._policy_enforcer.is_field_enabled("Processes", "Screenshots/Attachments"):
+            self.btn_attach.setEnabled(False)
+            self.btn_attach.setToolTip("Attachments have been disabled by your organization's discovery policy.")
+            self.btn_capture.setEnabled(False)
+            self.btn_capture.setToolTip("Screenshots have been disabled by your organization's discovery policy.")
 
         self.btn_add = QtWidgets.QPushButton("Add Process")
         self.btn_add.setCursor(QtCore.Qt.PointingHandCursor)
@@ -837,6 +847,27 @@ class ProcessesTab(QtWidgets.QWidget):
 
         # Load existing data after all UI setup is complete
         self._load_processes_data()
+
+    def _apply_field_policy(self, widget: QtWidgets.QWidget, field_name: str) -> None:
+        """Apply policy governance to a field widget"""
+        if not self._policy_enforcer or not self._policy_enforcer.has_policy():
+            return
+
+        section_name = "Processes"
+
+        if not self._policy_enforcer.is_field_enabled(section_name, field_name):
+            widget.setEnabled(False)
+            widget.setStyleSheet(widget.styleSheet() + """
+                QLineEdit:disabled, QTextEdit:disabled {
+                    background: #F3F4F6;
+                    color: #9CA3AF;
+                    border: 1px solid #E5E7EB;
+                }
+            """)
+            widget.setToolTip(
+                f"This field has been disabled by your organization's discovery policy.\n"
+                f"This configuration was set by your administrator."
+            )
 
     def _get_section_name(self) -> str:
         return "processes"

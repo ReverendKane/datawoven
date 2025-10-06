@@ -60,8 +60,9 @@ def _remove_policy() -> None:
 # ===============================================----->>
 
 class MainWindow(QtWidgets.QMainWindow):
-    def __init__(self):
+    def __init__(self, policy: dict | None = None):
         super().__init__()
+        self._policy = policy  # Store policy for governance
         self.setWindowIcon(QtGui.QIcon(str(constants.ICON_PATH)))
 
         # Calculate responsive sizing before other initialization
@@ -107,7 +108,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.statusBar().addPermanentWidget(self.progress)
 
         # Central content widget
-        self.content = ContentContainer()
+        self.content = ContentContainer(policy=self._policy)
         self.setCentralWidget(self.content)
 
         # Build menus on the QMainWindow
@@ -118,7 +119,6 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # Sync QAction <-> content sidebar state
         self.content.sidebarToggled.connect(self.toggleSidebarAct.setChecked)
-        self.showMaximized()
         self.statusBar().showMessage("Ready")
         _LOGGER.info(f'Main window initialized')
 
@@ -150,7 +150,9 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _resize_to_screen(self):
         """Resize to fill screen with maximum dimensions, centered if screen is larger."""
-        screen = QtWidgets.QApplication.screenAt(self.pos())
+        # Use the screen where the mouse cursor is, not where the window currently is
+        cursor_pos = QtGui.QCursor.pos()
+        screen = QtWidgets.QApplication.screenAt(cursor_pos)
         if screen is None:
             screen = QtWidgets.QApplication.primaryScreen()
 
@@ -164,7 +166,7 @@ class MainWindow(QtWidgets.QMainWindow):
         actual_width = min(available.width(), max_width)
         actual_height = min(available.height() - 100, max_height)
 
-        # Center the window on screen
+        # Center the window on the cursor's screen
         x = available.x() + (available.width() - actual_width) // 2
         y = available.y() + (available.height() - actual_height) // 2
 
@@ -583,8 +585,13 @@ class MainWindow(QtWidgets.QMainWindow):
 class ContentContainer(QtWidgets.QWidget):
     sidebarToggled = QtCore.Signal(bool)  # inform MainWindow to sync QAction
 
-    def __init__(self):
+    def __init__(self, policy: dict | None = None):
         super().__init__()
+        self._policy = policy  # Store raw policy
+
+        # Create policy enforcer for tabs to use
+        from discovery_assistant.policy_enforcer import PolicyEnforcer
+        self._policy_enforcer = PolicyEnforcer(policy)
 
         # Check AI Advisor policy first, before building UI
         self.ai_advisor_enabled = self._check_ai_advisor_policy()
@@ -633,15 +640,19 @@ class ContentContainer(QtWidgets.QWidget):
         self.tool_title = QtWidgets.QLabel("DISCOVERY ASSISTANT", self.header_frame)
         self.tool_title.setObjectName("toolTitle")
         self.tool_title.setFrameShape(QtWidgets.QFrame.NoFrame)
-        title_font = QtGui.QFont(family_name or "Segoe UI", 12)
-        title_font.setWeight(QtGui.QFont.DemiBold)
-        title_font.setHintingPreference(QtGui.QFont.PreferFullHinting)
+
+        # Force the label to use proper rendering
+        self.tool_title.setAttribute(QtCore.Qt.WA_OpaquePaintEvent, False)
+        self.tool_title.setAttribute(QtCore.Qt.WA_TranslucentBackground, False)
+
+        title_font = QtGui.QFont(family_name or "Segoe UI", 13)
+        title_font.setWeight(QtGui.QFont.Bold)
         self.tool_title.setFont(title_font)
         self.tool_title.setStyleSheet("""
         #toolTitle {
             color: #111;
             border: none;
-            background: transparent;
+            background: #FFFFFF;  /* Explicit solid background instead of transparent */
             padding: 0; margin: 0;
         }
         """)
@@ -767,7 +778,9 @@ class ContentContainer(QtWidgets.QWidget):
         col.setSpacing(0)
 
         # ---- navigation bar (your Navigation widget) ----
-        self.navbar = Navigation(constants.SECTIONS, left)
+        # Filter sections based on policy
+        enabled_sections = self._filter_sections_by_policy(constants.SECTIONS)
+        self.navbar = Navigation(enabled_sections, left)
         self.navbar.setMinimumHeight(34)
         self.navbar.setMaximumHeight(40)
         self.navbar.setObjectName("NavBar")
@@ -853,6 +866,35 @@ class ContentContainer(QtWidgets.QWidget):
         root_layout.addWidget(self.sidebar_stack)
 
         return root
+
+    def _filter_sections_by_policy(self, sections: dict) -> dict:
+        """Filter sections dict to only include enabled sections"""
+        if not self._policy:
+            return sections  # No policy = show all sections
+
+        from discovery_assistant.policy_utils import normalize_section_key
+
+        # Add this logging
+        _LOGGER.info(f"Filtering sections with policy. Total sections: {len(sections)}")
+
+        policy_sections = self._policy.get('data', {}).get('sections', {})  # NOTE: Added 'data' here
+        filtered = {}
+
+        for section_name, module_file in sections.items():
+            section_key = normalize_section_key(section_name)
+
+            if section_key not in policy_sections:
+                # Section not in policy = enabled by default
+                filtered[section_name] = module_file
+            else:
+                section_config = policy_sections[section_key]
+                if section_config.get('enabled', True):
+                    filtered[section_name] = module_file
+                else:
+                    _LOGGER.info(f"Section '{section_name}' disabled by policy")
+
+        _LOGGER.info(f"Filtered to {len(filtered)} enabled sections")
+        return filtered
 
     def _check_ai_advisor_policy(self) -> bool:
         """Check if AI Advisor is enabled in the installed policy"""
@@ -1055,6 +1097,14 @@ class ContentContainer(QtWidgets.QWidget):
             self.mainStack.setCurrentWidget(self._pages[name])
             return
 
+        # Check if section is enabled in policy
+        if self._policy and not self._is_section_enabled(name):
+            widget = self._placeholder_page(f"Section '{name}' is disabled by policy")
+            self._pages[name] = widget
+            self.mainStack.addWidget(widget)
+            self.mainStack.setCurrentWidget(widget)
+            return
+
         widget = self._load_section_widget(name)
         if widget is None:
             widget = self._placeholder_page(f"Missing tab: {name}")
@@ -1062,6 +1112,23 @@ class ContentContainer(QtWidgets.QWidget):
         self._pages[name] = widget
         self.mainStack.addWidget(widget)
         self.mainStack.setCurrentWidget(widget)
+
+    def _is_section_enabled(self, section_name: str) -> bool:
+        """Check if a section is enabled in the policy"""
+        if not self._policy:
+            return True  # No policy = all sections enabled
+
+        from discovery_assistant.policy_utils import normalize_section_key
+
+        sections = self._policy.get('data', {}).get('sections', {})
+        section_key = normalize_section_key(section_name)
+
+        if section_key not in sections:
+            # Section not in policy = enabled by default
+            return True
+
+        section_config = sections[section_key]
+        return section_config.get('enabled', True)
 
     def _load_section_widget(self, name: str):
         """
@@ -1080,7 +1147,8 @@ class ContentContainer(QtWidgets.QWidget):
             class_name = "".join(ch for ch in name.title() if ch.isalnum()) + "Tab"
             if hasattr(mod, class_name):
                 cls = getattr(mod, class_name)
-                return cls(self)  # parent = ContentContainer
+                # Pass policy enforcer to the tab
+                return cls(self, policy_enforcer=self._policy_enforcer)
             # fallbacks if you prefer factories
             if hasattr(mod, "build"):
                 return mod.build(self)
