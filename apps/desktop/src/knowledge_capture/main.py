@@ -1,9 +1,34 @@
 # --- Windows Qt DLL path fix (must run before importing PySide6) ---
 import os, sys, pathlib
-env_root = sys.prefix  # points at C:\Users\<you>\miniconda3\envs\rag
+
+env_root = sys.prefix  # points to your conda env
+
+# Conda Qt binaries (if they exist)
 qt_bin = pathlib.Path(env_root, "Library", "bin")
 if qt_bin.exists():
     os.add_dll_directory(str(qt_bin))
+
+# PIP-installed PySide6 paths (your actual installation)
+pyside_path = pathlib.Path(env_root, "Lib", "site-packages", "PySide6")
+if pyside_path.exists():
+    # Clear any conflicting environment variables first
+    os.environ.pop("QT_PLUGIN_PATH", None)
+    os.environ.pop("QT_QPA_PLATFORM_PLUGIN_PATH", None)
+
+    # Set Qt plugin paths to pip's PySide6
+    os.environ["QT_PLUGIN_PATH"] = str(pyside_path / "plugins")
+    os.environ["QT_QPA_PLATFORM_PLUGIN_PATH"] = str(pyside_path / "plugins")
+
+    # Add PySide6 to PATH
+    os.environ["PATH"] = str(pyside_path) + os.pathsep + os.environ.get("PATH", "")
+
+    # CRITICAL: WebEngine needs these DLLs
+    if (pyside_path / "Qt6WebEngineCore.dll").exists():
+        os.add_dll_directory(str(pyside_path))
+
+    # Set QtWebEngine process path
+    os.environ["QTWEBENGINEPROCESS_PATH"] = str(pyside_path / "QtWebEngineProcess.exe")
+    os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = "--disable-gpu"
 # -------------------------------------------------------------------
 
 from PySide6.QtWidgets import QApplication, QWidget, QSizePolicy
@@ -36,6 +61,7 @@ from PySide6.QtGui import (
     QPixmap, QScreen, QPainter, QPen, QColor, QFont, QAction,
     QKeySequence, QShortcut, QIcon, QTextCharFormat, QTextCursor
 )
+from markdown_dialog import MarkdownDialog
 
 
 class ScreenshotCapture(QWidget):
@@ -736,6 +762,98 @@ Text to process:
         return '. '.join(summary_sentences) + '.'
 
 
+# Add this new thread class after the MultiProviderSummarizationProcessor class:
+
+class AIMetadataGenerator(QThread):
+    """Background thread for AI-powered metadata generation"""
+    generation_completed = Signal(dict)
+    generation_failed = Signal(str)
+
+    def __init__(self, markdown_content: str):
+        super().__init__()
+        self.markdown_content = markdown_content
+        load_dotenv()
+        self.openai_client = None
+
+        # Initialize OpenAI client
+        openai_key = os.getenv('OPENAI_API_KEY')
+        if openai_key:
+            self.openai_client = openai.OpenAI(api_key=openai_key)
+
+    def run(self):
+        try:
+            if not self.openai_client:
+                self.generation_failed.emit("OpenAI API key not found in environment variables")
+                return
+
+            # Truncate content if too long (keep first ~3000 words for context)
+            words = self.markdown_content.split()
+            if len(words) > 3000:
+                truncated_content = ' '.join(words[:3000]) + "\n\n[Content truncated for analysis...]"
+            else:
+                truncated_content = self.markdown_content
+
+            system_prompt = """You are a RAG (Retrieval-Augmented Generation) metadata specialist. 
+Your task is to analyze technical documentation and generate optimized metadata for retrieval systems.
+
+Generate TWO things:
+1. TAGS: 3-5 specific, lowercase tags focusing on:
+   - Technical concepts and frameworks mentioned
+   - Architectural patterns described
+   - Key operations or methods covered
+   - Practical use cases
+
+   Tags should be specific enough to differentiate this content from general documentation.
+   Use underscores for multi-word tags (e.g., "state_management", "graph_workflows")
+
+2. NOTES: Exactly 2 sentences summarizing:
+   - First sentence: What the content describes
+   - Second sentence: The practical application or key benefit
+
+Return your response as valid JSON in this exact format:
+{
+  "tags": ["tag1", "tag2", "tag3"],
+  "notes": "First sentence here. Second sentence here."
+}"""
+
+            user_prompt = f"""Analyze this technical documentation and generate optimized metadata:
+
+{truncated_content}
+
+Remember: Return ONLY valid JSON with "tags" (array of lowercase strings) and "notes" (2 sentences)."""
+
+            response = self.openai_client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                temperature=0.3,
+                max_tokens=500,
+                response_format={"type": "json_object"}
+            )
+
+            result_text = response.choices[0].message.content.strip()
+            result = json.loads(result_text)
+
+            # Validate and normalize tags
+            if "tags" in result and isinstance(result["tags"], list):
+                result["tags"] = [tag.strip().lower() for tag in result["tags"] if tag.strip()]
+            else:
+                result["tags"] = []
+
+            # Ensure notes exists
+            if "notes" not in result or not result["notes"]:
+                result["notes"] = ""
+
+            self.generation_completed.emit(result)
+
+        except json.JSONDecodeError as e:
+            self.generation_failed.emit(f"Failed to parse AI response as JSON: {e}")
+        except Exception as e:
+            self.generation_failed.emit(f"AI generation failed: {e}")
+
+
 class SharedComponents:
     """Shared UI components and functionality between modes"""
 
@@ -827,6 +945,7 @@ class KnowledgeCaptureApp(QMainWindow):
         self.ocr_thread = None
         self.summarization_thread = None
         self._text_timer = None
+        self.markdown_mode_widgets = {}
 
         # Add metadata panel reference
         self.metadata_panel = None
@@ -857,7 +976,6 @@ class KnowledgeCaptureApp(QMainWindow):
 
         self.setStyleSheet("""
             QPushButton {
-                cursor: pointer;
                 padding: 6px 12px;
                 border: 1px solid #555555;
                 border-radius: 4px;
@@ -865,7 +983,6 @@ class KnowledgeCaptureApp(QMainWindow):
                 color: #ffffff;
             }
             QPushButton:hover {
-                cursor: pointer;
                 background-color: #000000;
                 border: none;
                 color: #ffffff;
@@ -875,7 +992,6 @@ class KnowledgeCaptureApp(QMainWindow):
                 border: none;
             }
             QPushButton:disabled {
-                cursor: default;
                 background-color: #2a2a2a;
                 color: #666666;
                 border-color: #333333;
@@ -899,12 +1015,16 @@ class KnowledgeCaptureApp(QMainWindow):
         main_layout.setSpacing(0)
 
         # Metadata panel - fixed 280px, won't scale
-        self.metadata_panel = MetadataPanel(self.get_output_folder)
+        self.metadata_panel = MetadataPanel(
+            self.get_output_folder,
+            lambda: self.mode_tabs.currentIndex()  # Pass tab index callback
+        )
         main_layout.addWidget(self.metadata_panel)
 
         # Tabs - take remaining space, minimum 600px
         self.mode_tabs = QTabWidget()
         self.mode_tabs.setMinimumHeight(600)
+        self.mode_tabs.currentChanged.connect(self.on_tab_changed)
         main_layout.addWidget(self.mode_tabs, 1)
 
         # OCR Mode
@@ -914,6 +1034,10 @@ class KnowledgeCaptureApp(QMainWindow):
         # Text Input Mode
         text_widget = self.create_text_mode()
         self.mode_tabs.addTab(text_widget, "Text Input")
+
+        # Markdown Mode
+        markdown_widget = self.create_markdown_mode()
+        self.mode_tabs.addTab(markdown_widget, "Markdown Import")
 
         # Status bar
         self.statusBar().showMessage("Ready for knowledge capture")
@@ -1040,6 +1164,305 @@ class KnowledgeCaptureApp(QMainWindow):
         self.text_copy_btn.clicked.connect(lambda: self.copy_to_clipboard('text'))
 
         return widget
+
+    def create_markdown_mode(self):
+        """Create the markdown import mode interface"""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(10, 10, 10, 10)
+
+        # Instructions
+        info_group = QGroupBox("Markdown Import")
+        info_layout = QVBoxLayout(info_group)
+        info_label = QLabel(
+            "Paste markdown content from documentation sites (LangGraph, LangChain, etc.) "
+            "that already provide markdown export. No summarization needed—just add metadata and save."
+        )
+        info_label.setWordWrap(True)
+        info_layout.addWidget(info_label)
+        layout.addWidget(info_group)
+
+        # Enhancement input
+        enhancement_group = QGroupBox("Enhancements")
+        enhancement_layout = QFormLayout(enhancement_group)
+
+        # Persistent Tags field
+        self.persistent_tags_input = QLineEdit()
+        self.persistent_tags_input.setPlaceholderText(
+            "Tags that persist across all captures (e.g., agentic, documentation)")
+        enhancement_layout.addRow("Persistent Tags:", self.persistent_tags_input)
+
+        # Generate Tags field with button
+        generate_tags_layout = QHBoxLayout()
+        self.generated_tags_input = QLineEdit()
+        self.generated_tags_input.setPlaceholderText("AI-generated tags will appear here...")
+        self.generated_tags_input.setReadOnly(True)
+        generate_tags_layout.addWidget(self.generated_tags_input)
+
+        self.generate_tags_btn = QPushButton("Generate")
+        self.generate_tags_btn.setCursor(Qt.PointingHandCursor)
+        self.generate_tags_btn.clicked.connect(self.generate_ai_metadata)
+        self.generate_tags_btn.setEnabled(False)
+        generate_tags_layout.addWidget(self.generate_tags_btn)
+
+        enhancement_layout.addRow("Generate Tags:", generate_tags_layout)
+
+        layout.addWidget(enhancement_group)
+
+        # Markdown input area
+        markdown_group = QGroupBox("Markdown Content")
+        markdown_layout = QVBoxLayout(markdown_group)
+
+        self.markdown_input = QTextEdit()
+        self.markdown_input.setPlaceholderText("Paste markdown content here...")
+        self.markdown_input.setMinimumHeight(300)
+        markdown_layout.addWidget(self.markdown_input)
+
+        layout.addWidget(markdown_group)
+
+        # Preview/Save buttons
+        button_layout = QHBoxLayout()
+
+        preview_btn = QPushButton("Preview Markdown")
+        preview_btn.setCursor(Qt.PointingHandCursor)
+        preview_btn.clicked.connect(self.preview_markdown_modal)
+        button_layout.addWidget(preview_btn)
+
+        self.markdown_save_btn = QPushButton("Save Markdown + Metadata")
+        self.markdown_save_btn.setCursor(Qt.PointingHandCursor)
+        self.markdown_save_btn.clicked.connect(lambda: self.save_markdown_direct('markdown'))
+        self.markdown_save_btn.setEnabled(False)
+        button_layout.addWidget(self.markdown_save_btn)
+
+        layout.addLayout(button_layout)
+
+        # Enable save button when content is present
+        self.markdown_input.textChanged.connect(self.on_markdown_input_changed)
+
+        return widget
+
+    def on_tab_changed(self, index: int):
+        """Handle tab changes"""
+        self.metadata_panel.update_load_button_state(index)
+
+        # If switching to Markdown Import and we have loaded content, populate it
+        if index == 2 and hasattr(self.metadata_panel, 'loaded_markdown_content'):
+            self.markdown_input.setPlainText(self.metadata_panel.loaded_markdown_content)
+
+            # Source URL is already populated in metadata panel's original_source field
+            # No need to set it again here since populate_from_metadata() already handled it
+
+            # Clear the temporary storage
+            delattr(self.metadata_panel, 'loaded_markdown_content')
+            if hasattr(self.metadata_panel, 'loaded_metadata'):
+                delattr(self.metadata_panel, 'loaded_metadata')
+
+    def on_markdown_input_changed(self):
+        """Enable save button when markdown content is present"""
+        has_content = bool(self.markdown_input.toPlainText().strip())
+        self.markdown_save_btn.setEnabled(has_content)
+        self.generate_tags_btn.setEnabled(has_content)
+
+    def detect_metadata_from_markdown(self):
+        """Auto-populate metadata panel from markdown content and URL"""
+        import re
+
+        content = self.markdown_input.toPlainText()
+        url = self.metadata_panel.original_source.text().strip()
+
+        if not content:
+            QMessageBox.warning(self, "No Content", "Please paste markdown content first.")
+            return
+
+        # Extract title from first # heading
+        title_match = re.search(r'^#\s+(.+)$', content, re.MULTILINE)
+        if title_match:
+            title = title_match.group(1).strip()
+            self.metadata_panel.title_input.setText(title)
+
+        # Set source URL
+        if url:
+            self.metadata_panel.original_source.setText(url)
+
+        # Auto-detect source type and tags based on URL
+        url_lower = url.lower()
+
+        if "langgraph" in url_lower or "langchain" in url_lower:
+            self.metadata_panel.source_type.setCurrentText("web_scrape")
+
+            # Smart tagging based on URL structure
+            tags = []
+            if "langgraph" in url_lower:
+                tags.append("langgraph")
+            if "langchain" in url_lower:
+                tags.append("langchain")
+
+            # Add section-specific tags
+            if "concept" in url_lower:
+                tags.append("concepts")
+            if "tutorial" in url_lower:
+                tags.append("tutorials")
+            if "api" in url_lower or "reference" in url_lower:
+                tags.append("api_reference")
+            if "guide" in url_lower:
+                tags.append("guides")
+
+            # Add general tags
+            tags.extend(["agentic_workflows", "rag_implementation"])
+
+            self.metadata_panel.tags_input.setText(", ".join(tags))
+            self.metadata_panel.priority.setCurrentText("high")
+            self.metadata_panel.quality.setCurrentText("excellent")
+
+        elif "pinecone" in url_lower:
+            self.metadata_panel.source_type.setCurrentText("web_scrape")
+            self.metadata_panel.tags_input.setText("pinecone, vector_database, rag_implementation")
+            self.metadata_panel.priority.setCurrentText("high")
+
+        elif "anthropic" in url_lower or "claude" in url_lower:
+            self.metadata_panel.source_type.setCurrentText("web_scrape")
+            self.metadata_panel.tags_input.setText("claude, anthropic, llm_apis, rag_implementation")
+            self.metadata_panel.priority.setCurrentText("high")
+
+        else:
+            # Generic documentation
+            self.metadata_panel.source_type.setCurrentText("web_scrape")
+            self.metadata_panel.tags_input.setText("documentation, rag_implementation")
+
+        # Detect author from common patterns
+        author_match = re.search(r'(?:Author|By):\s*(.+)$', content, re.MULTILINE | re.IGNORECASE)
+        if author_match:
+            self.metadata_panel.author_input.setText(author_match.group(1).strip())
+        elif "langgraph" in url_lower or "langchain" in url_lower:
+            self.metadata_panel.author_input.setText("LangChain Team")
+
+        self.statusBar().showMessage("Metadata detected and populated")
+        QMessageBox.information(self, "Metadata Detected",
+                                "Metadata has been auto-populated. Please review and adjust as needed.")
+
+    def preview_markdown_modal(self):
+        """Show markdown preview in modal dialog using MarkdownDialog"""
+        content = self.markdown_input.toPlainText()
+
+        if not content.strip():
+            QMessageBox.information(self, "No Content", "Please paste markdown content first.")
+            return
+
+        try:
+            # Test if markdown library is available
+            try:
+                import markdown
+                print("✓ markdown library loaded")
+            except ImportError as e:
+                QMessageBox.warning(self, "Missing Library",
+                                    f"markdown library not found:\n{e}\n\nInstall with: pip install markdown")
+                return
+
+            # Test if markdown_dialog can be imported
+            try:
+                from markdown_dialog import MarkdownDialog
+                print("✓ MarkdownDialog imported")
+            except ImportError as e:
+                QMessageBox.warning(self, "Import Error", f"Could not import markdown_dialog.py:\n{e}")
+                return
+
+            # Get title from metadata panel or use default
+            title = self.metadata_panel.title_input.text().strip()
+            if not title:
+                title = "Markdown Preview"
+
+            print(f"✓ About to show modal with title: {title}")
+            print(f"✓ Content length: {len(content)} characters")
+
+            # Show the modal with the markdown content
+            result = MarkdownDialog.show_modal(self, content, title)
+
+            print(f"✓ Modal returned with result code: {result}")
+
+        except Exception as e:
+            import traceback
+            error_details = traceback.format_exc()
+            print(f"ERROR: {error_details}")
+            QMessageBox.critical(
+                self,
+                "Preview Error",
+                f"Failed to show markdown preview:\n\n{str(e)}\n\nFull traceback:\n{error_details}"
+            )
+
+    def save_markdown_direct(self, mode: str):
+        """Save markdown content directly without processing"""
+        content = self.markdown_input.toPlainText()
+
+        if not content:
+            return
+
+        # Get URL from metadata panel's original_source field
+        url = self.metadata_panel.original_source.text().strip()
+
+        if not url:
+            reply = QMessageBox.question(
+                self,
+                "No Source URL",
+                "No source URL provided in either Source URL or Original Source field. Continue saving without URL?",
+                QMessageBox.Yes | QMessageBox.No
+            )
+            if reply == QMessageBox.No:
+                return
+
+        # Clean the markdown before saving
+        from markdown_dialog import clean_markdown
+        cleaned_content = clean_markdown(content)
+        print(f"✓ Markdown cleaned for saving")
+
+        # Get metadata from panel
+        metadata = self.metadata_panel.get_metadata(
+            mode,
+            "markdown_import_direct",
+            "none",
+            "none"
+        )
+
+        metadata["markdown_import"] = True
+        metadata["source_url"] = url
+        metadata["cleaned"] = True
+
+        self.metadata_panel.print_metadata(metadata)
+
+        # Generate filename
+        if metadata.get("title"):
+            filename = "".join(c for c in metadata["title"] if c.isalnum() or c in (' ', '-', '_')).rstrip()
+            filename = filename.replace(' ', '_')
+        else:
+            filename = metadata["document_id"][:8]
+
+        output_folder = self.metadata_panel.output_folder.text()
+        output_dir = Path(output_folder)
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        md_path = output_dir / f"{filename}.md"
+        json_path = output_dir / f"{filename}.json"
+
+        try:
+            # Save cleaned markdown
+            with open(md_path, 'w', encoding='utf-8') as f:
+                f.write(cleaned_content)
+
+            with open(json_path, 'w', encoding='utf-8') as f:
+                json.dump(metadata, f, indent=2, ensure_ascii=False)
+
+            self.metadata_panel.save_as_defaults()
+
+            self.statusBar().showMessage(f"Saved: {md_path} and {json_path}")
+            QMessageBox.information(
+                self,
+                "Saved",
+                f"Cleaned markdown saved to:\n{md_path}\n\nMetadata saved to:\n{json_path}"
+            )
+
+            self.markdown_input.clear()
+
+        except Exception as e:
+            QMessageBox.warning(self, "Save Error", f"Failed to save files: {e}")
 
     def create_ocr_text_panel(self):
         """Create the OCR text processing panel"""
@@ -1172,14 +1595,96 @@ class KnowledgeCaptureApp(QMainWindow):
         if geometry:
             self.restoreGeometry(geometry)
 
-        output_folder = self.settings.value("output_folder", str(Path.home() / "Documents" / "KnowledgeBase"))
+        output_folder = self.settings.value("output_folder",
+                                            "D:/PROJECTS/CODE/Web/datawoven/data/rag-knowledge-base/raw")
         self.ocr_output_folder_input.setText(output_folder)
         self.text_output_folder_input.setText(output_folder)
+        self.metadata_panel.output_folder.setText(output_folder)
 
     def save_settings(self):
         """Save application settings"""
         self.settings.setValue("geometry", self.saveGeometry())
-        self.settings.setValue("output_folder", self.ocr_output_folder_input.text())
+        self.settings.setValue("output_folder", self.metadata_panel.output_folder.text())
+
+    def generate_ai_metadata(self):
+        """Generate tags and notes using AI"""
+        markdown_content = self.markdown_input.toPlainText().strip()
+
+        if not markdown_content:
+            QMessageBox.warning(self, "No Content", "Please paste markdown content first.")
+            return
+
+        # Check for OpenAI API key
+        load_dotenv()
+        if not os.getenv('OPENAI_API_KEY'):
+            QMessageBox.warning(
+                self,
+                "API Key Missing",
+                "OpenAI API key not found in .env file.\n\n"
+                "Please add: OPENAI_API_KEY=your_key_here"
+            )
+            return
+
+        # Disable button and show progress
+        self.generate_tags_btn.setEnabled(False)
+        self.generate_tags_btn.setText("Generating...")
+        self.statusBar().showMessage("Generating AI metadata...")
+
+        # Start AI generation thread
+        self.ai_metadata_thread = AIMetadataGenerator(markdown_content)
+        self.ai_metadata_thread.generation_completed.connect(self.handle_ai_metadata_result)
+        self.ai_metadata_thread.generation_failed.connect(self.handle_ai_metadata_error)
+        self.ai_metadata_thread.start()
+
+    def handle_ai_metadata_result(self, result: dict):
+        """Handle AI metadata generation completion"""
+        self.generate_tags_btn.setEnabled(True)
+        self.generate_tags_btn.setText("Generate")
+
+        # Get persistent tags
+        persistent_tags_text = self.persistent_tags_input.text().strip()
+        if persistent_tags_text:
+            persistent_tags = set(tag.strip().lower() for tag in persistent_tags_text.split(',') if tag.strip())
+        else:
+            persistent_tags = set()
+
+        # Get generated tags
+        generated_tags = set(result.get("tags", []))
+
+        # Combine with persistent tags first, then generated
+        all_tags = sorted(persistent_tags) + sorted(generated_tags - persistent_tags)
+
+        # Update the generated tags display field
+        self.generated_tags_input.setText(", ".join(sorted(generated_tags)))
+
+        # Update the metadata panel tags field with combined tags
+        self.metadata_panel.tags_input.setText(", ".join(all_tags))
+
+        # Update notes in metadata panel
+        notes = result.get("notes", "")
+        self.metadata_panel.notes_input.setPlainText(notes)
+
+        self.statusBar().showMessage("AI metadata generated successfully")
+
+        QMessageBox.information(
+            self,
+            "Metadata Generated",
+            f"Generated {len(generated_tags)} tags and summary notes.\n\n"
+            f"Tags have been added to the metadata panel.\n"
+            f"Review and modify as needed before saving."
+        )
+
+    def handle_ai_metadata_error(self, error: str):
+        """Handle AI metadata generation error"""
+        self.generate_tags_btn.setEnabled(True)
+        self.generate_tags_btn.setText("Generate")
+        self.statusBar().showMessage("AI generation failed")
+
+        QMessageBox.warning(
+            self,
+            "Generation Error",
+            f"Failed to generate metadata:\n\n{error}"
+        )
 
     def check_ai_status(self):
         """Check AI provider availability and update UI"""
@@ -1526,7 +2031,7 @@ class KnowledgeCaptureApp(QMainWindow):
         """Save the markdown content and metadata to files"""
         if mode == 'ocr':
             content = self.ocr_markdown_edit.toPlainText()
-            output_folder = self.ocr_output_folder_input.text()
+            output_folder = self.metadata_panel.output_folder.text()
             ai_provider = self.ocr_ai_provider.currentText()
             summary_style = self.ocr_summary_style.currentText()
             processing_method = f"ocr_summary_{summary_style}"
@@ -1609,13 +2114,12 @@ class KnowledgeCaptureApp(QMainWindow):
 class MetadataPanel(QWidget):
     """Shared metadata panel for both OCR and Text modes"""
 
-    def __init__(self, output_folder_callback):
+    def __init__(self, output_folder_callback, tab_widget_callback):
         super().__init__()
         self.output_folder_callback = output_folder_callback
+        self.tab_widget_callback = tab_widget_callback  # NEW
         self.current_metadata = {}
         self.init_ui()
-
-        # Fixed height - will NOT scale
         self.setFixedHeight(500)
 
     def init_ui(self):
@@ -1636,10 +2140,11 @@ class MetadataPanel(QWidget):
         self.clear_btn.clicked.connect(self.clear_fields)
         header_layout.addWidget(self.clear_btn)
 
-        self.load_defaults_btn = QPushButton("Load Last Defaults")
-        self.load_defaults_btn.setCursor(Qt.PointingHandCursor)
-        self.load_defaults_btn.clicked.connect(self.load_defaults)
-        header_layout.addWidget(self.load_defaults_btn)
+        self.load_existing_btn = QPushButton("Load Existing")
+        self.load_existing_btn.setCursor(Qt.PointingHandCursor)
+        self.load_existing_btn.clicked.connect(self.load_existing_document)
+        self.load_existing_btn.setEnabled(False)  # Will enable based on active tab
+        header_layout.addWidget(self.load_existing_btn)
 
         self.quick_fill_btn = QPushButton("Quick Fill")
         self.quick_fill_btn.setCursor(Qt.PointingHandCursor)
@@ -1662,6 +2167,7 @@ class MetadataPanel(QWidget):
             "web_scrape",
             "manual_notes",
             "document",
+            "pre-formatted",
             "other"
         ])
         form_layout.addRow("Source Type:", self.source_type)
@@ -1714,11 +2220,24 @@ class MetadataPanel(QWidget):
         self.notes_input.setMaximumHeight(80)
         form_layout.addRow("Notes:", self.notes_input)
 
+        # Output Location
+        output_layout = QHBoxLayout()
+
+        self.output_folder = QLineEdit()
+        self.output_folder.setPlaceholderText("Where to save markdown and metadata files...")
+        output_layout.addWidget(self.output_folder)
+
+        change_btn = QPushButton("Change")
+        change_btn.setCursor(Qt.PointingHandCursor)
+        change_btn.clicked.connect(self.browse_output_folder)
+        output_layout.addWidget(change_btn)
+
+        form_layout.addRow("Save To:", output_layout)
+
         layout.addLayout(form_layout)
 
         self.setStyleSheet("""
             QPushButton {
-                cursor: pointer;
                 padding: 6px 12px;
                 border: 1px solid #555555;
                 border-radius: 4px;
@@ -1726,7 +2245,6 @@ class MetadataPanel(QWidget):
                 color: #ffffff;
             }
             QPushButton:hover {
-                cursor: pointer;
                 background-color: #000000;
                 border: none;
                 color: #ffffff;
@@ -1736,7 +2254,6 @@ class MetadataPanel(QWidget):
                 border: none;
             }
             QPushButton:disabled {
-                cursor: default;
                 background-color: #2a2a2a;
                 color: #666666;
                 border-color: #333333;
@@ -1794,6 +2311,105 @@ class MetadataPanel(QWidget):
 
         return "document"
 
+    def update_load_button_state(self, tab_index: int):
+        """Enable Load Existing button only on Markdown Import tab (index 2)"""
+        self.load_existing_btn.setEnabled(tab_index == 2)
+
+    def load_existing_document(self):
+        """Load existing markdown and JSON metadata files"""
+        from PySide6.QtWidgets import QFileDialog
+
+        output_folder = self.output_folder.text()
+
+        # Browse for JSON file
+        json_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select Metadata JSON File",
+            output_folder,
+            "JSON Files (*.json)"
+        )
+
+        if not json_path:
+            return
+
+        try:
+            # Load JSON metadata
+            with open(json_path, 'r', encoding='utf-8') as f:
+                metadata = json.load(f)
+
+            # Construct markdown path from JSON filename
+            md_path = Path(json_path).with_suffix('.md')
+
+            if not md_path.exists():
+                QMessageBox.warning(
+                    self,
+                    "Markdown File Not Found",
+                    f"Could not find companion markdown file:\n{md_path}"
+                )
+                return
+
+            # Load markdown content
+            with open(md_path, 'r', encoding='utf-8') as f:
+                markdown_content = f.read()
+
+            # Populate metadata fields
+            self.populate_from_metadata(metadata)
+
+            # Get the parent window and populate markdown content directly
+            parent_window = self.window()
+            if hasattr(parent_window, 'markdown_input'):
+                parent_window.markdown_input.setPlainText(markdown_content)
+
+            QMessageBox.information(
+                self,
+                "Document Loaded",
+                f"Successfully loaded:\n{md_path.name}\n\nMetadata and content have been populated."
+            )
+
+        except Exception as e:
+            import traceback
+            print(f"Load error: {traceback.format_exc()}")
+            QMessageBox.warning(self, "Load Error", f"Failed to load document: {e}")
+
+    def populate_from_metadata(self, metadata: Dict[str, Any]):
+        """Populate all fields from loaded metadata"""
+        # Source type
+        source_type = metadata.get("source_type", "Auto-detect")
+        index = self.source_type.findText(source_type)
+        if index >= 0:
+            self.source_type.setCurrentIndex(index)
+
+        # Text fields
+        self.title_input.setText(metadata.get("title", ""))
+        self.original_source.setText(metadata.get("original_source", ""))
+        self.author_input.setText(metadata.get("author", ""))
+        self.page_numbers.setText(metadata.get("page_numbers", ""))
+
+        # Tags - join list back to comma-separated string
+        tags = metadata.get("tags", [])
+        if isinstance(tags, list):
+            self.tags_input.setText(", ".join(tags))
+        else:
+            self.tags_input.setText(str(tags))
+
+        # Priority
+        priority = metadata.get("processing_priority", "medium")
+        index = self.priority.findText(priority)
+        if index >= 0:
+            self.priority.setCurrentIndex(index)
+
+        # Ready checkbox
+        self.ready_checkbox.setChecked(metadata.get("ready_for_processing", True))
+
+        # Quality
+        quality = metadata.get("quality_assessment", "good")
+        index = self.quality.findText(quality)
+        if index >= 0:
+            self.quality.setCurrentIndex(index)
+
+        # Notes
+        self.notes_input.setPlainText(metadata.get("notes", ""))
+
     def get_metadata(self, mode: str, processing_method: str,
                      ai_provider: str, summary_style: str) -> Dict[str, Any]:
         """Generate metadata dictionary from current fields"""
@@ -1826,11 +2442,24 @@ class MetadataPanel(QWidget):
             "processing_priority": self.priority.currentText(),
             "ai_provider_used": ai_provider,
             "summary_style": summary_style,
-            "quality_assessment": self.quality.currentText()
+            "quality_assessment": self.quality.currentText(),
+            "storage_location": self.output_folder.text()
         }
 
         self.current_metadata = metadata
         return metadata
+
+    def browse_output_folder(self):
+        """Browse for output folder"""
+        from PySide6.QtWidgets import QFileDialog
+
+        folder = QFileDialog.getExistingDirectory(
+            self,
+            "Select Output Folder",
+            self.output_folder.text()
+        )
+        if folder:
+            self.output_folder.setText(folder)
 
     def save_as_defaults(self):
         """Save current field values as defaults"""
@@ -1961,6 +2590,16 @@ class MetadataPanel(QWidget):
 def main():
     """Main application entry point"""
     app = QApplication(sys.argv)
+
+    # Initialize QtWebEngine
+    try:
+        from PySide6.QtWebEngineCore import QWebEngineSettings
+        QWebEngineSettings.globalSettings().setAttribute(
+            QWebEngineSettings.WebAttribute.PluginsEnabled, False
+        )
+        print("✓ QtWebEngine initialized")
+    except Exception as e:
+        print(f"⚠ QtWebEngine init warning: {e}")
 
     # Check for required dependencies
     try:
