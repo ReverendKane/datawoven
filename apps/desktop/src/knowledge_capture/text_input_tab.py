@@ -19,7 +19,10 @@ from odf.opendocument import load as odf_load  # odfpy for .odt files
 from bs4 import BeautifulSoup  # beautifulsoup4 for .html files
 import chardet  # chardet for encoding detection
 
-_LOGGER = logging.getLogger(__name__)
+# ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+LOG_CTX = "TextInputTab"
+log = logging.LoggerAdapter(logging.getLogger(__name__), {"ctx": LOG_CTX})
+# ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
 
 class TextInputTab(QWidget):

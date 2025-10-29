@@ -5,7 +5,7 @@ Post-Processing Tab - Validate and sync processed documents to S3
 import logging
 import os
 from pathlib import Path
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, Optional
 from dataclasses import dataclass
 from datetime import datetime
 import json
@@ -15,8 +15,8 @@ from dotenv import load_dotenv
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QGroupBox, QLineEdit, QComboBox, QProgressBar, QCheckBox,
-    QTextEdit, QFileDialog, QMessageBox, QSplitter, QListWidget
+    QGroupBox, QLineEdit, QListWidget, QProgressBar, QCheckBox,
+    QTextEdit, QFileDialog, QMessageBox, QSplitter
 )
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont
@@ -33,7 +33,10 @@ except ImportError:
 # Load environment variables
 load_dotenv()
 
-_LOGGER = logging.getLogger(__name__)
+# ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+LOG_CTX = "PostProcessingTab"
+log = logging.LoggerAdapter(logging.getLogger(__name__), {"ctx": LOG_CTX})
+# ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
 
 @dataclass
@@ -349,7 +352,7 @@ class PostProcessingTab(QWidget):
 
         except Exception as e:
             error_msg = f"Error scanning folder: {str(e)}"
-            _LOGGER.error(error_msg, exc_info=True)
+            log.error(error_msg, exc_info=True)
             QMessageBox.critical(self, "Scan Error", error_msg)
 
     def validate_documents(self):
@@ -481,7 +484,7 @@ class PostProcessingTab(QWidget):
             with open(md_file, 'rb') as f:
                 return hashlib.sha256(f.read()).hexdigest()
         except Exception as e:
-            _LOGGER.error(f"Error calculating hash: {e}")
+            log.error(f"Error calculating hash: {e}")
             return ""
 
     def sync_to_s3(self):
@@ -622,7 +625,7 @@ class PostProcessingTab(QWidget):
                 except Exception as e:
                     failed_count += 1
                     self.log_message(f"  ✗ Failed: {str(e)}")
-                    _LOGGER.error(f"Error syncing {result.file_path}: {e}", exc_info=True)
+                    log.error(f"Error syncing {result.file_path}: {e}", exc_info=True)
 
                 self.progress_bar.setValue(idx + 1)
 
@@ -663,7 +666,7 @@ class PostProcessingTab(QWidget):
 
         except Exception as e:
             error_msg = f"S3 sync error: {str(e)}"
-            _LOGGER.error(error_msg, exc_info=True)
+            log.error(error_msg, exc_info=True)
             QMessageBox.critical(self, "S3 Sync Failed", error_msg)
             self.log_message(f"\n✗ SYNC FAILED: {error_msg}")
 
@@ -690,11 +693,11 @@ class PostProcessingTab(QWidget):
                 self.log_message("  No existing manifest found - will create new one")
                 return {}
             else:
-                _LOGGER.warning(f"Error loading manifest: {e}")
+                log.warning(f"Error loading manifest: {e}")
                 self.log_message(f"  ⚠ Could not load manifest, will check files individually")
                 return {}
         except Exception as e:
-            _LOGGER.error(f"Unexpected error loading manifest: {e}", exc_info=True)
+            log.error(f"Unexpected error loading manifest: {e}", exc_info=True)
             return {}
 
     def upload_document_to_s3(self, s3_client, bucket: str, client_name: str,
@@ -771,7 +774,7 @@ class PostProcessingTab(QWidget):
             )
 
         except Exception as e:
-            _LOGGER.error(f"Error updating metadata: {e}", exc_info=True)
+            log.error(f"Error updating metadata: {e}", exc_info=True)
             # Still upload original metadata
             s3_client.upload_file(
                 str(json_file),
@@ -819,7 +822,7 @@ class PostProcessingTab(QWidget):
             self.log_message(f"  Audit log saved: {operation_key}")
 
         except Exception as e:
-            _LOGGER.error(f"Error creating audit log: {e}", exc_info=True)
+            log.error(f"Error creating audit log: {e}", exc_info=True)
             self.log_message(f"  ⚠ Warning: Could not save audit log: {e}")
 
     def update_manifest(self, s3_client, bucket: str, client_name: str,
@@ -858,7 +861,7 @@ class PostProcessingTab(QWidget):
             )
 
         except Exception as e:
-            _LOGGER.error(f"Error updating manifest: {e}", exc_info=True)
+            log.error(f"Error updating manifest: {e}", exc_info=True)
 
     def disable_metadata_panel(self, disabled: bool):
         """Disable/enable metadata panel during processing"""
@@ -875,4 +878,4 @@ class PostProcessingTab(QWidget):
         """Add message to log output"""
         timestamp = datetime.now().strftime("%H:%M:%S")
         self.log_output.append(f"[{timestamp}] {message}")
-        _LOGGER.info(message)
+        log.info(message)

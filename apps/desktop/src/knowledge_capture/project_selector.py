@@ -6,17 +6,23 @@ from PySide6.QtWidgets import (
     QWidget, QHBoxLayout, QLabel, QComboBox, QPushButton,
     QMessageBox, QInputDialog, QFileDialog, QFrame
 )
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QTimer
 from PySide6.QtGui import QColor
 from pathlib import Path
 import os
 from dotenv import load_dotenv
+import logging
+
+# ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+LOG_CTX = "ProjectSelector"
+log = logging.LoggerAdapter(logging.getLogger(__name__), {"ctx": LOG_CTX})
+# ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
 
 class ProjectSelector(QFrame):
     """
-    Project selector widget with combobox and create button
-    Reads projects from D:\DATA\ directory
+    Project selector widget with combobox and create a button
+    Reads projects from D:\\DATA\\ directory
     """
     project_changed = Signal(str, str)  # (project_name, project_path)
 
@@ -30,6 +36,7 @@ class ProjectSelector(QFrame):
         self.init_ui()
         self.load_projects()
         self.set_default_project()
+        QTimer.singleShot(0, lambda: self.on_project_changed(self.project_combo.currentText()))
 
     def init_ui(self):
         """Initialize the UI"""

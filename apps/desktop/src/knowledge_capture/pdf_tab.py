@@ -5,10 +5,8 @@ Handles single and batch PDF processing with automatic chapter detection
 
 import logging
 import json
-import uuid
 from pathlib import Path
 from typing import Optional, List, Dict, Tuple
-from datetime import datetime
 from dataclasses import dataclass, field
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
@@ -19,7 +17,10 @@ from PySide6.QtCore import Qt, QThread, Signal
 import fitz  # PyMuPDF
 import re
 
-_LOGGER = logging.getLogger(__name__)
+# ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+LOG_CTX = "PDFTab"
+log = logging.LoggerAdapter(logging.getLogger(__name__), {"ctx": LOG_CTX})
+# ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
 
 @dataclass

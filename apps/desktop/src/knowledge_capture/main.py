@@ -19,6 +19,67 @@ if pyside_path.exists():
     os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = "--disable-gpu"
 # -------------------------------------------------------------------
 
+# SET UP LOGGING
+import logging
+import logging.config
+
+class ExtraContextFilter(logging.Filter):
+    """
+    Ensures every LogRecord has a 'ctx' attribute so %(ctx)s in the formatter
+    never fails. If a module didn't provide 'ctx', fall back to the logger name.
+    """
+    def filter(self, record: logging.LogRecord) -> bool:
+        if not hasattr(record, "ctx"):
+            record.ctx = record.name
+        return True
+
+def setup_logging(level: str = "INFO") -> None:
+    """
+    Configure console logging with a contextual field [%(ctx)s].
+    """
+    config = {
+        "version": 1,
+        "disable_existing_loggers": False,
+        "filters": {
+            "add_ctx": {"()": ExtraContextFilter},
+        },
+        "formatters": {
+            "console": {
+                "format": "%(asctime)s | %(levelname)-8s | [%(ctx)s] %(name)s:%(lineno)d - %(message)s",
+                "datefmt": "%H:%M:%S",
+            }
+        },
+        "handlers": {
+            "console": {
+                "class": "logging.StreamHandler",
+                "level": "DEBUG",
+                "formatter": "console",
+                "filters": ["add_ctx"],
+                "stream": "ext://sys.stdout",
+            }
+        },
+        "root": {
+            "level": level,
+            "handlers": ["console"],
+        },
+        # Optional: quiet down noisy third-party loggers here
+        "loggers": {
+            "urllib3": {"level": "WARNING"},
+            "botocore": {"level": "WARNING"},
+            "PySide6": {"level": "WARNING"},
+        },
+    }
+    logging.config.dictConfig(config)
+
+
+setup_logging(level="DEBUG")   # or "INFO" in production
+
+# ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+LOG_CTX = "Main"
+log = logging.LoggerAdapter(logging.getLogger(__name__), {"ctx": LOG_CTX})
+# ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+
 from PySide6.QtWidgets import QApplication, QWidget, QSizePolicy
 import sys, os, json, uuid, tempfile, requests
 from dotenv import load_dotenv
@@ -265,7 +326,7 @@ class MultiProviderSummarizationProcessor(QThread):
                 genai.configure(api_key=google_key)
                 self.genai_client = genai
         except Exception as e:
-            print(f"API setup error: {e}")
+            log.info(f"API setup error: {e}")
 
     def run(self):
         try:
@@ -654,7 +715,7 @@ class MetadataPanel(QWidget):
             with open(defaults_path, 'w', encoding='utf-8') as f:
                 json.dump(defaults, f, indent=2)
         except Exception as e:
-            print(f"Failed to save defaults: {e}")
+            log.info(f"Failed to save defaults: {e}")
 
     def clear_fields(self):
         self.source_type.setCurrentIndex(0)
@@ -693,10 +754,10 @@ class MetadataPanel(QWidget):
         self.priority.setCurrentText("high")
         self.quality.setCurrentText("excellent")
 
-    def print_metadata(self, metadata):
-        print("\n" + "=" * 60 + "\nCAPTURE METADATA\n" + "=" * 60)
-        print(json.dumps(metadata, indent=2))
-        print("=" * 60 + "\n")
+    def log_metadata(self, metadata):
+        log.info("\n" + "=" * 60 + "\nCAPTURE METADATA\n" + "=" * 60)
+        log.info(json.dumps(metadata, indent=2))
+        log.info("=" * 60 + "\n")
 
 
 class KnowledgeCaptureApp(QMainWindow):
@@ -813,6 +874,11 @@ class KnowledgeCaptureApp(QMainWindow):
 
     def on_project_changed(self, project_name: str, project_path: str):
         """Handle project selection change"""
+        log.info(f"Project changed: {project_name} ({project_path})")
+        self.current_project_name = project_name
+        self.current_project_path = project_path
+        self.metadata_panel.update_load_button_state(self.mode_tabs.currentIndex())
+        self.metadata_panel.save_as_defaults()
         self.current_project_name = project_name
         self.current_project_path = project_path
 
@@ -990,7 +1056,7 @@ class KnowledgeCaptureApp(QMainWindow):
     def handle_metadata_generation_error(self, error):
         """Handle AI metadata generation error silently"""
         # Don't show error to user - metadata generation is optional/automatic
-        print(f"Metadata generation failed (silent): {error}")
+        log.info(f"Metadata generation failed (silent): {error}")
 
     def generate_final_markdown(self, mode: str):
         """Generate the final markdown output for the specified mode"""
@@ -1122,7 +1188,7 @@ class KnowledgeCaptureApp(QMainWindow):
         # Where to save + metadata
         folder = self.metadata_panel.output_folder.text()
         metadata = self.metadata_panel.get_metadata(mode, method, provider, style)
-        self.metadata_panel.print_metadata(metadata)
+        self.metadata_panel.log_metadata(metadata)
 
         # Filename stem (safe + short hash to avoid collisions)
         title = metadata.get("title", "") or ""
@@ -1192,7 +1258,7 @@ def main():
         from PySide6.QtWebEngineCore import QWebEngineSettings
         QWebEngineSettings.globalSettings().setAttribute(QWebEngineSettings.WebAttribute.PluginsEnabled, False)
     except Exception as e:
-        print(f"WebEngine warning: {e}")
+        log.info(f"WebEngine warning: {e}")
     try:
         import pytesseract, cv2, PIL
     except ImportError as e:

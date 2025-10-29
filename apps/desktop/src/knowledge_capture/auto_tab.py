@@ -10,11 +10,16 @@ from PySide6.QtWidgets import (
     QFileDialog, QMessageBox, QDialog, QDialogButtonBox, QScrollArea, QFrame
 )
 from PySide6.QtCore import Qt, Signal, QThread
-from PySide6.QtGui import QIcon
 from pathlib import Path
 from datetime import datetime
 import json
 import uuid
+import logging
+
+# ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+LOG_CTX = "AutoTab"
+log = logging.LoggerAdapter(logging.getLogger(__name__), {"ctx": LOG_CTX})
+# ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
 
 class QueueProcessorThread(QThread):
@@ -1130,6 +1135,150 @@ NOTES:
             self.log_signal.emit(f"      ✗ Error loading file: {e}")
             return ""
 
+    def process_web_assignment(self, assignment, base_output_folder):
+        """Process website crawler assignment"""
+        from web_scraping_tab import WebScraperProcessor, WebScrapingResult, _rate_limiter
+        import gzip
+
+        # Get assignment config
+        selected_urls = assignment.get("selected_urls", [])
+        extraction_method = assignment.get("extraction_method", "Auto-detect")
+        content_selector = assignment.get("content_selector", "")
+        exclude_patterns = assignment.get("exclude_patterns", "")
+        enable_summarization = assignment.get("enable_summarization", True)
+        rate_limit = assignment.get("rate_limit", 2)
+
+        if not selected_urls:
+            self.log_signal.emit("  ✗ No URLs selected for scraping")
+            return
+
+        # Create output subfolder
+        output_dir = Path(base_output_folder) / "web"
+        output_dir.mkdir(exist_ok=True)
+
+        self.log_signal.emit(f"  Output: {output_dir}")
+        self.log_signal.emit(f"  URLs to scrape: {len(selected_urls)}\n")
+
+        # Process each URL
+        for idx, url in enumerate(selected_urls, 1):
+            self.log_signal.emit(f"  [{idx}/{len(selected_urls)}] Scraping: {url}")
+
+            try:
+                # Wait for rate limiting
+                from urllib.parse import urlparse
+                domain = urlparse(url).netloc
+                _rate_limiter.wait_if_needed(domain)
+
+                # Scrape page (synchronous for now)
+                import requests
+                from bs4 import BeautifulSoup
+
+                headers = {'User-Agent': 'DataWoven/1.0 (Knowledge Capture Tool)'}
+                response = requests.get(url, headers=headers, timeout=10)
+                response.raise_for_status()
+
+                soup = BeautifulSoup(response.text, 'html.parser')
+
+                # Extract title
+                title_tag = soup.find('title')
+                title = title_tag.get_text(strip=True) if title_tag else url
+
+                # Extract description
+                meta_desc = soup.find('meta', attrs={'name': 'description'})
+                description = meta_desc.get('content', '') if meta_desc else ''
+
+                # Extract content
+                if extraction_method == "Custom Selectors" and content_selector:
+                    elements = soup.select(content_selector)
+                    content = "\n\n".join([el.get_text(separator=' ', strip=True) for el in elements])
+                else:
+                    # Use auto-detection
+                    main = soup.find('main') or soup.find('article') or soup.find('body')
+                    if main:
+                        content = main.get_text(separator=' ', strip=True)
+                    else:
+                        content = soup.get_text(separator=' ', strip=True)
+
+                if not content:
+                    self.log_signal.emit(f"    ⚠ No content extracted")
+                    continue
+
+                word_count = len(content.split())
+                self.log_signal.emit(f"    ✓ Extracted {word_count} words")
+
+                # Summarization
+                summary = content
+                ai_tags = ""
+                ai_notes = ""
+                input_tokens = 0
+                output_tokens = 0
+
+                if enable_summarization and len(content) > 200:
+                    self.log_signal.emit(f"    ► Summarizing...")
+                    provider = assignment.get("ai_provider", "OpenAI")
+                    summary, ai_tags, ai_notes, input_tokens, output_tokens = self.run_summarization_sync(content,
+                                                                                                          provider)
+                    self.log_signal.emit(f"    ✓ Summarization complete (tokens: {input_tokens + output_tokens})")
+
+                    if self.current_batch_id:
+                        self.cost_tracker.add_item(
+                            batch_id=self.current_batch_id,
+                            item_name=url,
+                            item_type="web_page",
+                            input_tokens=input_tokens,
+                            output_tokens=output_tokens
+                        )
+                        self.cost_tracker.update_batch(
+                            self.current_batch_id,
+                            input_tokens=input_tokens,
+                            output_tokens=output_tokens
+                        )
+
+                # Build metadata
+                metadata = {
+                    "title": title,
+                    "original_source": url,
+                    "description": description,
+                    "word_count": word_count,
+                    "source_type": "web",
+                    "timestamp": datetime.now().isoformat(),
+                    "tags": ai_tags,
+                    "notes": ai_notes
+                }
+
+                # Generate markdown
+                markdown_content = self.generate_markdown_content(
+                    title=title,
+                    source=url,
+                    tags=ai_tags,
+                    content=summary
+                )
+
+                # Generate safe filename from URL
+                safe_name = "".join(c if c.isalnum() or c in ('-', '_') else '_' for c in urlparse(url).path)
+                safe_name = safe_name[:100]  # Limit length
+                if not safe_name:
+                    safe_name = f"page_{idx}"
+
+                # Save files
+                output_txt = output_dir / f"{safe_name}.txt.gz"
+                output_md = output_dir / f"{safe_name}.md"
+                output_json = output_dir / f"{safe_name}.json"
+
+                with gzip.open(output_txt, 'wt', encoding='utf-8') as f:
+                    f.write(content)
+                with open(output_md, 'w', encoding='utf-8') as f:
+                    f.write(markdown_content)
+                with open(output_json, 'w', encoding='utf-8') as f:
+                    json.dump(metadata, f, indent=2)
+
+                self.log_signal.emit(f"    ✓ Saved: {safe_name}.txt.gz + .md + .json\n")
+
+            except Exception as e:
+                self.log_signal.emit(f"    ✗ Error: {e}\n")
+
+        self.log_signal.emit(f"\n  ✓ Completed: {len(selected_urls)} URLs processed")
+
 
 class AutoTab(QWidget):
     """Auto Mode - Batch processing and automation"""
@@ -1249,7 +1398,7 @@ class AutoTab(QWidget):
         self.config_stack.addWidget(self.create_folder_ocr_config())
         self.config_stack.addWidget(self.create_folder_text_config())
         self.config_stack.addWidget(self.create_folder_pdf_config())
-        self.config_stack.addWidget(self.create_placeholder_config("Website Crawler - Coming Soon"))
+        self.config_stack.addWidget(self.create_website_crawler_config())  # NEW
         self.config_stack.addWidget(self.create_placeholder_config("Database Query - Coming Soon"))
         self.config_stack.addWidget(self.create_placeholder_config("API Integration - Coming Soon"))
         self.config_stack.addWidget(self.create_placeholder_config("Post-Processing - Coming Soon"))
@@ -1553,6 +1702,169 @@ class AutoTab(QWidget):
 
         return widget
 
+    def create_website_crawler_config(self):
+        """Create configuration panel for Website Crawler assignment type"""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+
+        # Basic settings group
+        basic_group = QGroupBox("Basic Settings")
+        basic_layout = QFormLayout(basic_group)
+        basic_layout.setContentsMargins(12, 12, 12, 12)
+
+        self.web_assignment_name = QLineEdit()
+        self.web_assignment_name.setPlaceholderText("e.g., 'AWS Bedrock Documentation'")
+        self.web_assignment_name.textChanged.connect(self.update_preview)
+        basic_layout.addRow("Assignment Name:", self.web_assignment_name)
+
+        # Start URL
+        url_layout = QHBoxLayout()
+        self.web_start_url = QLineEdit()
+        self.web_start_url.setPlaceholderText("https://docs.example.com/")
+        self.web_start_url.textChanged.connect(self.update_preview)
+        url_layout.addWidget(self.web_start_url)
+
+        self.web_analyze_btn = QPushButton("Analyze")
+        self.web_analyze_btn.setCursor(Qt.PointingHandCursor)
+        self.web_analyze_btn.clicked.connect(self.analyze_website)
+        url_layout.addWidget(self.web_analyze_btn)
+
+        basic_layout.addRow("Start URL:", url_layout)
+
+        layout.addWidget(basic_group)
+
+        # Tree builder group
+        tree_group = QGroupBox("Website Tree")
+        tree_layout = QVBoxLayout(tree_group)
+        tree_layout.setContentsMargins(12, 12, 12, 12)
+
+        # Tree controls
+        tree_controls = QHBoxLayout()
+
+        self.web_expand_btn = QPushButton("Expand Selected")
+        self.web_expand_btn.setCursor(Qt.PointingHandCursor)
+        self.web_expand_btn.clicked.connect(self.expand_selected_nodes)
+        self.web_expand_btn.setEnabled(False)
+        tree_controls.addWidget(self.web_expand_btn)
+
+        self.web_select_all_btn = QPushButton("Select All")
+        self.web_select_all_btn.setCursor(Qt.PointingHandCursor)
+        self.web_select_all_btn.clicked.connect(self.select_all_tree_nodes)
+        self.web_select_all_btn.setEnabled(False)
+        tree_controls.addWidget(self.web_select_all_btn)
+
+        self.web_deselect_all_btn = QPushButton("Deselect All")
+        self.web_deselect_all_btn.setCursor(Qt.PointingHandCursor)
+        self.web_deselect_all_btn.clicked.connect(self.deselect_all_tree_nodes)
+        self.web_deselect_all_btn.setEnabled(False)
+        tree_controls.addWidget(self.web_deselect_all_btn)
+
+        tree_controls.addStretch()
+        tree_layout.addLayout(tree_controls)
+
+        # Tree widget
+        self.web_tree = QTreeWidget()
+        self.web_tree.setHeaderLabels(["URL / Title", "Status"])
+        self.web_tree.setColumnWidth(0, 400)
+        self.web_tree.itemChanged.connect(self.on_tree_item_changed)
+        tree_layout.addWidget(self.web_tree)
+
+        # Selection summary
+        self.web_selection_label = QLabel("Selected: 0 pages")
+        self.web_selection_label.setStyleSheet("color: #aaa; font-size: 11px; padding: 5px;")
+        tree_layout.addWidget(self.web_selection_label)
+
+        layout.addWidget(tree_group)
+
+        # Crawl settings group
+        crawl_group = QGroupBox("Crawl Settings")
+        crawl_layout = QFormLayout(crawl_group)
+        crawl_layout.setContentsMargins(12, 12, 12, 12)
+
+        self.web_same_domain = QCheckBox("Same domain only")
+        self.web_same_domain.setChecked(True)
+        self.web_same_domain.stateChanged.connect(self.update_preview)
+        crawl_layout.addRow("Domain Filter:", self.web_same_domain)
+
+        self.web_max_depth = QSpinBox()
+        self.web_max_depth.setRange(1, 10)
+        self.web_max_depth.setValue(5)
+        self.web_max_depth.valueChanged.connect(self.update_preview)
+        crawl_layout.addRow("Max Depth:", self.web_max_depth)
+
+        self.web_rate_limit = QSpinBox()
+        self.web_rate_limit.setRange(1, 60)
+        self.web_rate_limit.setValue(2)
+        self.web_rate_limit.setSuffix(" req/sec")
+        self.web_rate_limit.valueChanged.connect(self.update_preview)
+        crawl_layout.addRow("Rate Limit:", self.web_rate_limit)
+
+        layout.addWidget(crawl_group)
+
+        # Content extraction group
+        extraction_group = QGroupBox("Content Extraction")
+        extraction_layout = QFormLayout(extraction_group)
+        extraction_layout.setContentsMargins(12, 12, 12, 12)
+
+        self.web_extraction_method = QComboBox()
+        self.web_extraction_method.addItems(["Auto-detect", "Custom Selectors", "Readability"])
+        self.web_extraction_method.currentTextChanged.connect(self.update_preview)
+        extraction_layout.addRow("Method:", self.web_extraction_method)
+
+        self.web_content_selector = QLineEdit()
+        self.web_content_selector.setPlaceholderText("article, .main-content")
+        self.web_content_selector.textChanged.connect(self.update_preview)
+        extraction_layout.addRow("Content Selector:", self.web_content_selector)
+
+        self.web_exclude_patterns = QLineEdit()
+        self.web_exclude_patterns.setPlaceholderText(".nav, .footer, .sidebar")
+        self.web_exclude_patterns.textChanged.connect(self.update_preview)
+        extraction_layout.addRow("Exclude Patterns:", self.web_exclude_patterns)
+
+        layout.addWidget(extraction_group)
+
+        # Processing options group
+        processing_group = QGroupBox("Processing Options")
+        processing_layout = QFormLayout(processing_group)
+        processing_layout.setContentsMargins(12, 12, 12, 12)
+
+        self.web_enable_summarization = QCheckBox("Enable AI summarization")
+        self.web_enable_summarization.setChecked(True)
+        self.web_enable_summarization.stateChanged.connect(self.update_preview)
+        processing_layout.addRow("Summarization:", self.web_enable_summarization)
+
+        self.web_ai_provider = QComboBox()
+        self.web_ai_provider.addItems(["OpenAI", "Claude", "Gemini"])
+        self.web_ai_provider.setCurrentText("OpenAI")
+        self.web_ai_provider.currentTextChanged.connect(self.update_preview)
+        processing_layout.addRow("AI Provider:", self.web_ai_provider)
+
+        layout.addWidget(processing_group)
+
+        # Cluster management
+        cluster_group = QGroupBox("Cluster Management")
+        cluster_layout = QHBoxLayout(cluster_group)
+
+        self.web_save_cluster_btn = QPushButton("Save as Cluster")
+        self.web_save_cluster_btn.setCursor(Qt.PointingHandCursor)
+        self.web_save_cluster_btn.clicked.connect(self.save_web_cluster)
+        self.web_save_cluster_btn.setEnabled(False)
+        cluster_layout.addWidget(self.web_save_cluster_btn)
+
+        self.web_load_cluster_btn = QPushButton("Load Cluster")
+        self.web_load_cluster_btn.setCursor(Qt.PointingHandCursor)
+        self.web_load_cluster_btn.clicked.connect(self.load_web_cluster)
+        cluster_layout.addWidget(self.web_load_cluster_btn)
+
+        layout.addWidget(cluster_group)
+
+        layout.addStretch()
+
+        # Initialize crawler (will be set when db_path is available)
+        self.web_crawler = None
+
+        return widget
+
     def create_assignment_queue(self):
         """Create the Assignment Queue sub-tab"""
         widget = QWidget()
@@ -1770,6 +2082,319 @@ class AutoTab(QWidget):
         """Update real-time analytics display during queue processing"""
         self.realtime_tokens_label.setText(f"Tokens: {stats.get('total_tokens', 0):,}")
         self.realtime_cost_label.setText(f"Cost: ${stats.get('total_cost', 0):.4f}")
+
+    # web_crawler_methods.py
+    """
+    Web crawler integration methods for AutoTab class
+    Add these methods to the AutoTab class in auto_tab.py
+    """
+
+    def init_web_crawler(self):
+        """Initialize web crawler with database path"""
+        if not hasattr(self, 'database_path') or not self.database_path:
+            return
+
+        from website_tree_crawler import WebsiteTreeCrawler
+        from web_scraping_tab import DomainRateLimiter
+
+        rate_limiter = DomainRateLimiter()
+        self.web_crawler = WebsiteTreeCrawler(
+            db_path=self.database_path,
+            rate_limiter=rate_limiter
+        )
+
+    def analyze_website(self):
+        """Analyze start URL and populate tree"""
+        start_url = self.web_start_url.text().strip()
+
+        if not start_url:
+            QMessageBox.warning(self, "No URL", "Please enter a start URL first.")
+            return
+
+        if not start_url.startswith(('http://', 'https://')):
+            QMessageBox.warning(self, "Invalid URL", "URL must start with http:// or https://")
+            return
+
+        # Initialize crawler if not already done
+        if not self.web_crawler:
+            self.init_web_crawler()
+
+        # Show progress
+        self.web_analyze_btn.setEnabled(False)
+        self.web_analyze_btn.setText("Analyzing...")
+
+        try:
+            # Analyze in same thread for now (could be threaded later)
+            same_domain = self.web_same_domain.isChecked()
+            tree = self.web_crawler.analyze_start_url(start_url, same_domain_only=same_domain)
+
+            # Populate tree widget
+            self._populate_tree_widget(tree)
+
+            # Enable controls
+            self.web_expand_btn.setEnabled(True)
+            self.web_select_all_btn.setEnabled(True)
+            self.web_deselect_all_btn.setEnabled(True)
+            self.web_save_cluster_btn.setEnabled(True)
+
+            QMessageBox.information(
+                self,
+                "Analysis Complete",
+                f"Found {len(tree)} pages/links from start URL.\n"
+                "Check the pages you want to scrape, then click 'Expand Selected' to load more."
+            )
+
+        except Exception as e:
+            QMessageBox.critical(self, "Analysis Failed", f"Failed to analyze website:\n\n{str(e)}")
+
+        finally:
+            self.web_analyze_btn.setEnabled(True)
+            self.web_analyze_btn.setText("Analyze")
+
+    def _populate_tree_widget(self, tree_dict):
+        """Populate QTreeWidget from crawler tree"""
+        self.web_tree.clear()
+        self.web_tree.blockSignals(True)  # Prevent itemChanged during setup
+
+        # Get hierarchical structure
+        tree_display = self.web_crawler.get_tree_for_display()
+
+        if not tree_display:
+            return
+
+        def add_tree_item(parent_widget, node_data):
+            """Recursively add tree items"""
+            url = node_data['url']
+            title = node_data['title'] or url
+
+            item = QTreeWidgetItem(parent_widget)
+            item.setText(0, title[:80])  # Truncate long titles
+            item.setData(0, Qt.UserRole, url)  # Store URL
+            item.setCheckState(0, Qt.Checked if node_data['is_checked'] else Qt.Unchecked)
+
+            # Status column
+            status = "✓ Analyzed" if node_data['is_analyzed'] else "⌛ Not analyzed"
+            if node_data['is_external']:
+                status += " (external)"
+            item.setText(1, status)
+
+            # Add children
+            for child_node in node_data.get('children', []):
+                add_tree_item(item, child_node)
+
+        # Add root
+        add_tree_item(self.web_tree, tree_display)
+        self.web_tree.expandAll()
+        self.web_tree.blockSignals(False)
+
+        self._update_selection_count()
+
+    def on_tree_item_changed(self, item, column):
+        """Handle tree item check state changes"""
+        if column != 0:
+            return
+
+        url = item.data(0, Qt.UserRole)
+        if url and url in self.web_crawler.tree:
+            node = self.web_crawler.tree[url]
+            node.is_checked = (item.checkState(0) == Qt.Checked)
+
+        self._update_selection_count()
+
+    def _update_selection_count(self):
+        """Update selected pages label"""
+        if not self.web_crawler:
+            return
+
+        checked = len(self.web_crawler.get_checked_urls())
+        self.web_selection_label.setText(f"Selected: {checked} pages")
+
+        # Enable save cluster if pages selected
+        self.web_save_cluster_btn.setEnabled(checked > 0)
+
+    def expand_selected_nodes(self):
+        """Expand selected nodes to load their child pages"""
+        if not self.web_crawler:
+            return
+
+        checked_urls = self.web_crawler.get_checked_urls()
+
+        if not checked_urls:
+            QMessageBox.information(self, "No Selection", "Please check the pages you want to expand first.")
+            return
+
+        # Show progress
+        self.web_expand_btn.setEnabled(False)
+        self.web_expand_btn.setText(f"Expanding {len(checked_urls)}...")
+
+        try:
+            same_domain = self.web_same_domain.isChecked()
+            max_depth = self.web_max_depth.value()
+
+            # Expand nodes (could be threaded)
+            self.web_crawler.expand_nodes(checked_urls, same_domain_only=same_domain, max_depth=max_depth)
+
+            # Refresh tree display
+            self._populate_tree_widget(self.web_crawler.tree)
+
+            QMessageBox.information(
+                self,
+                "Expansion Complete",
+                f"Expanded {len(checked_urls)} nodes.\nTree now contains {len(self.web_crawler.tree)} total pages."
+            )
+
+        except Exception as e:
+            QMessageBox.critical(self, "Expansion Failed", f"Failed to expand nodes:\n\n{str(e)}")
+
+        finally:
+            self.web_expand_btn.setEnabled(True)
+            self.web_expand_btn.setText("Expand Selected")
+
+    def select_all_tree_nodes(self):
+        """Select all tree nodes"""
+        if not self.web_crawler:
+            return
+
+        self.web_tree.blockSignals(True)
+
+        def set_check_recursive(item):
+            item.setCheckState(0, Qt.Checked)
+            url = item.data(0, Qt.UserRole)
+            if url and url in self.web_crawler.tree:
+                self.web_crawler.tree[url].is_checked = True
+
+            for i in range(item.childCount()):
+                set_check_recursive(item.child(i))
+
+        for i in range(self.web_tree.topLevelItemCount()):
+            set_check_recursive(self.web_tree.topLevelItem(i))
+
+        self.web_tree.blockSignals(False)
+        self._update_selection_count()
+
+    def deselect_all_tree_nodes(self):
+        """Deselect all tree nodes"""
+        if not self.web_crawler:
+            return
+
+        self.web_tree.blockSignals(True)
+
+        def set_uncheck_recursive(item):
+            item.setCheckState(0, Qt.Unchecked)
+            url = item.data(0, Qt.UserRole)
+            if url and url in self.web_crawler.tree:
+                self.web_crawler.tree[url].is_checked = False
+
+            for i in range(item.childCount()):
+                set_uncheck_recursive(item.child(i))
+
+        for i in range(self.web_tree.topLevelItemCount()):
+            set_uncheck_recursive(self.web_tree.topLevelItem(i))
+
+        self.web_tree.blockSignals(False)
+        self._update_selection_count()
+
+    def save_web_cluster(self):
+        """Save current tree as a cluster"""
+        if not self.web_crawler:
+            return
+
+        checked_urls = self.web_crawler.get_checked_urls()
+
+        if not checked_urls:
+            QMessageBox.warning(self, "No Selection", "Please select pages to save first.")
+            return
+
+        # Prompt for cluster name
+        from PySide6.QtWidgets import QInputDialog
+
+        cluster_name, ok = QInputDialog.getText(
+            self,
+            "Save Cluster",
+            f"Save {len(checked_urls)} selected pages as cluster.\nEnter cluster name:",
+            QLineEdit.Normal,
+            self.web_assignment_name.text() or "Web Cluster"
+        )
+
+        if not ok or not cluster_name:
+            return
+
+        try:
+            # Get project name (if available)
+            project_name = getattr(self, 'current_project_name', '')
+
+            cluster_id = self.web_crawler.save_cluster(cluster_name, project_name)
+
+            QMessageBox.information(
+                self,
+                "Cluster Saved",
+                f"Cluster '{cluster_name}' saved successfully!\n"
+                f"Cluster ID: {cluster_id}\n"
+                f"Selected pages: {len(checked_urls)}"
+            )
+
+        except Exception as e:
+            QMessageBox.critical(self, "Save Failed", f"Failed to save cluster:\n\n{str(e)}")
+
+    def load_web_cluster(self):
+        """Load a saved cluster"""
+        if not self.web_crawler:
+            self.init_web_crawler()
+
+        # Get list of clusters
+        project_name = getattr(self, 'current_project_name', '')
+        clusters = self.web_crawler.db.list_clusters(project_name)
+
+        if not clusters:
+            QMessageBox.information(self, "No Clusters", "No saved clusters found for this project.")
+            return
+
+        # Show selection dialog
+        from PySide6.QtWidgets import QInputDialog
+
+        cluster_names = [f"{c['cluster_name']} ({c['url_count']} pages)" for c in clusters]
+        cluster_name, ok = QInputDialog.getItem(
+            self,
+            "Load Cluster",
+            "Select cluster to load:",
+            cluster_names,
+            0,
+            False
+        )
+
+        if not ok:
+            return
+
+        # Find selected cluster
+        selected_idx = cluster_names.index(cluster_name)
+        cluster_id = clusters[selected_idx]['cluster_id']
+
+        try:
+            cluster = self.web_crawler.load_cluster(cluster_id)
+
+            # Populate tree
+            self._populate_tree_widget(self.web_crawler.tree)
+
+            # Update fields
+            self.web_start_url.setText(cluster.start_url)
+            self.web_assignment_name.setText(cluster.cluster_name)
+
+            # Enable controls
+            self.web_expand_btn.setEnabled(True)
+            self.web_select_all_btn.setEnabled(True)
+            self.web_deselect_all_btn.setEnabled(True)
+            self.web_save_cluster_btn.setEnabled(True)
+
+            QMessageBox.information(
+                self,
+                "Cluster Loaded",
+                f"Loaded cluster '{cluster.cluster_name}'\n"
+                f"Total pages: {len(self.web_crawler.tree)}\n"
+                f"Selected: {len(cluster.selected_urls)}"
+            )
+
+        except Exception as e:
+            QMessageBox.critical(self, "Load Failed", f"Failed to load cluster:\n\n{str(e)}")
 
     # Event handlers and utility methods
 
@@ -2168,6 +2793,38 @@ class AutoTab(QWidget):
                     "ai_provider": self.pdf_ai_provider.currentText(),
                     "summary_style": self.pdf_summary_style.currentText()
                 }
+            elif assignment_type == "Website Crawler":
+                if not self.web_assignment_name.text():
+                    QMessageBox.warning(self, "No Name", "Please enter an assignment name.")
+                    return
+
+                # Get selected URLs from crawler
+                if not self.web_crawler or not self.web_crawler.tree:
+                    QMessageBox.warning(self, "No Tree", "Please analyze a website first.")
+                    return
+
+                selected_urls = self.web_crawler.get_checked_urls()
+
+                if not selected_urls:
+                    QMessageBox.warning(self, "No Selection", "Please select pages to scrape.")
+                    return
+
+                # Build assignment config
+                assignment_config = {
+                    "id": str(uuid.uuid4()),
+                    "type": "Website Crawler",
+                    "name": self.web_assignment_name.text(),
+                    "start_url": self.web_start_url.text(),
+                    "selected_urls": selected_urls,
+                    "same_domain_only": self.web_same_domain.isChecked(),
+                    "max_depth": self.web_max_depth.value(),
+                    "rate_limit": self.web_rate_limit.value(),
+                    "extraction_method": self.web_extraction_method.currentText(),
+                    "content_selector": self.web_content_selector.text(),
+                    "exclude_patterns": self.web_exclude_patterns.text(),
+                    "enable_summarization": self.web_enable_summarization.isChecked(),
+                    "ai_provider": self.web_ai_provider.currentText()
+                }
             else:
                 assignment_data = {
                     "type": assignment_type,
@@ -2478,3 +3135,19 @@ class MetadataDialog(QWidget):
             "tags": self.tags_input.text(),
             "notes": self.notes_input.toPlainText()
         }
+
+    # ========== Website Crawler Methods ==========
+
+    def init_web_crawler(self):
+        """Initialize web crawler with database path"""
+        if not hasattr(self, "database_path") or not self.database_path:
+            return
+
+        from website_tree_crawler import WebsiteTreeCrawler
+        from web_scraping_tab import DomainRateLimiter
+
+        rate_limiter = DomainRateLimiter()
+        self.web_crawler = WebsiteTreeCrawler(
+            db_path=self.database_path,
+            rate_limiter=rate_limiter
+        )

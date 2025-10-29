@@ -5,23 +5,27 @@ Intelligent content extraction with multiple fallback strategies
 """
 
 import logging
+import sys
 import re
 import random
-from typing import Optional, Dict, Tuple
+from typing import Optional, Dict
 from dataclasses import dataclass
 from collections import defaultdict
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QGroupBox, QLineEdit, QCheckBox, QProgressBar, QComboBox,
-    QTextEdit, QMessageBox, QSplitter, QTabWidget, QFormLayout
+    QGroupBox, QLineEdit, QFormLayout, QProgressBar, QComboBox,
+    QTextEdit, QMessageBox, QSplitter, QTabWidget
 )
 from PySide6.QtCore import Qt, QThread, Signal
 import requests
 from bs4 import BeautifulSoup
-from urllib.parse import urlparse, urljoin
+from urllib.parse import urlparse
 import time
 
-_LOGGER = logging.getLogger(__name__)
+# ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+LOG_CTX = "WebScrapingTab"
+log = logging.LoggerAdapter(logging.getLogger(__name__), {"ctx": LOG_CTX})
+# ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
 
 class DomainRateLimiter:
@@ -49,7 +53,7 @@ class DomainRateLimiter:
             oldest = min(timestamps)
             wait_time = 3600 - (now - oldest)
             if wait_time > 0:
-                _LOGGER.warning(f"Hourly limit reached for {domain}, waiting {wait_time:.1f}s")
+                log.warning(f"Hourly limit reached for {domain}, waiting {wait_time:.1f}s")
                 time.sleep(wait_time)
                 now = time.time()
 
@@ -59,7 +63,7 @@ class DomainRateLimiter:
             oldest_recent = min(recent)
             wait_time = 60 - (now - oldest_recent)
             if wait_time > 0:
-                _LOGGER.info(f"Per-minute limit reached for {domain}, waiting {wait_time:.1f}s")
+                log.info(f"Per-minute limit reached for {domain}, waiting {wait_time:.1f}s")
                 time.sleep(wait_time)
                 now = time.time()
 
@@ -68,7 +72,7 @@ class DomainRateLimiter:
 
         # Add randomized delay (2-5 seconds) for politeness
         random_delay = random.uniform(2.0, 5.0)
-        _LOGGER.info(f"Adding polite delay: {random_delay:.1f}s")
+        log.info(f"Adding polite delay: {random_delay:.1f}s")
         time.sleep(random_delay)
 
 
@@ -355,7 +359,7 @@ class WebScraperProcessor(QThread):
                 self.processing_failed.emit(result.error or "Unknown error")
 
         except Exception as e:
-            _LOGGER.error(f"Web scraping failed: {e}")
+            log.error(f"Web scraping failed: {e}")
             self.processing_failed.emit(str(e))
 
 
@@ -414,7 +418,7 @@ class WebScraperProcessor(QThread):
                 # Handle rate limiting (429) and server errors (503)
                 if response.status_code == 429:
                     retry_after = int(response.headers.get('Retry-After', 60))
-                    _LOGGER.warning(f"Rate limited (429), waiting {retry_after}s before retry")
+                    log.warning(f"Rate limited (429), waiting {retry_after}s before retry")
                     self.processing_progress.emit(f"Rate limited - waiting {retry_after}s...")
                     time.sleep(retry_after)
                     retry_count += 1
@@ -423,7 +427,7 @@ class WebScraperProcessor(QThread):
                 elif response.status_code == 503:
                     # Server temporarily unavailable - exponential backoff
                     wait_time = (2 ** retry_count) * 5  # 5s, 10s, 20s
-                    _LOGGER.warning(f"Server unavailable (503), waiting {wait_time}s before retry")
+                    log.warning(f"Server unavailable (503), waiting {wait_time}s before retry")
                     self.processing_progress.emit(f"Server busy - waiting {wait_time}s...")
                     time.sleep(wait_time)
                     retry_count += 1
@@ -461,7 +465,7 @@ class WebScraperProcessor(QThread):
             except requests.exceptions.HTTPError as e:
                 if retry_count < max_retries - 1:
                     wait_time = (2 ** retry_count) * 3
-                    _LOGGER.warning(f"HTTP error, retrying in {wait_time}s: {e}")
+                    log.warning(f"HTTP error, retrying in {wait_time}s: {e}")
                     time.sleep(wait_time)
                     retry_count += 1
                 else:
@@ -625,7 +629,7 @@ class WebScraperProcessor(QThread):
                 return meta_title.get('content').strip()
 
         except Exception as e:
-            _LOGGER.warning(f"Error extracting title: {e}")
+            log.warning(f"Error extracting title: {e}")
 
         return "Untitled"
 
@@ -659,7 +663,7 @@ class WebScraperProcessor(QThread):
                 return self.clean_text(content)
 
         except Exception as e:
-            _LOGGER.error(f"Content extraction error: {e}")
+            log.error(f"Content extraction error: {e}")
 
         return "No content could be extracted from this page."
 
@@ -717,7 +721,7 @@ class WebScraperProcessor(QThread):
                     pass  # Skip patterns that cause issues
 
         except Exception as e:
-            _LOGGER.warning(f"Error removing unwanted elements: {e}")
+            log.warning(f"Error removing unwanted elements: {e}")
 
 
     def extract_by_selector(self, soup: BeautifulSoup, selector: str) -> str:
@@ -727,7 +731,8 @@ class WebScraperProcessor(QThread):
             if elements:
                 return '\n\n'.join(el.get_text(separator='\n', strip=True) for el in elements if el)
         except Exception as e:
-            _LOGGER.warning(f"Selector extraction error: {e}")
+            log.warning(f"Selector extraction error: {e}")
+
         return ""
 
 
@@ -874,7 +879,7 @@ class WebScraperProcessor(QThread):
                     }))
 
                 except Exception as e:
-                    _LOGGER.debug(f"Error scoring element: {e}")
+                    log.debug(f"Error scoring element: {e}")
                     continue
 
             # Sort by score and return best candidate
@@ -882,9 +887,9 @@ class WebScraperProcessor(QThread):
                 candidates.sort(reverse=True, key=lambda x: x[0])
 
                 # Debug logging
-                _LOGGER.info("Content extraction candidates (tag-agnostic):")
+                log.info("Content extraction candidates (tag-agnostic):")
                 for i, (score, elem, metrics) in enumerate(candidates[:5]):
-                    _LOGGER.info(f"  #{i + 1}: <{metrics['tag']}> score={score:.1f}, "
+                    log.info(f"  #{i + 1}: <{metrics['tag']}> score={score:.1f}, "
                                  f"words={metrics['word_count']}, sentences={metrics['sentences']}, "
                                  f"link_density={metrics['link_density']:.2f}")
 
@@ -892,7 +897,7 @@ class WebScraperProcessor(QThread):
                 return best_element.get_text(separator='\n', strip=True)
 
         except Exception as e:
-            _LOGGER.error(f"Readability extraction error: {e}")
+            log.error(f"Readability extraction error: {e}")
 
         return ""
 
@@ -937,7 +942,7 @@ class WebScraperProcessor(QThread):
                     if len(content.split()) > 50:
                         return content
             except Exception as e:
-                _LOGGER.debug(f"Error with selector {tag}: {e}")
+                log.debug(f"Error with selector {tag}: {e}")
                 continue
 
         return ""
@@ -993,7 +998,7 @@ class WebScrapingTab(QWidget):
         self.shared_components = shared_components
         self.metadata_panel = metadata_panel
 
-        _LOGGER.info("WebScrapingTab initialized")
+        log.info("WebScrapingTab initialized")
 
         self._processing = False
         self._web_processor = None
@@ -1260,7 +1265,7 @@ class WebScrapingTab(QWidget):
             QMessageBox.warning(self, "No URL", "Please enter a URL to scrape.")
             return
 
-        _LOGGER.info(f"Starting web scraping: {url}")
+        log.info(f"Starting web scraping: {url}")
 
         # Clear previous results
         self.raw_text_edit.clear()

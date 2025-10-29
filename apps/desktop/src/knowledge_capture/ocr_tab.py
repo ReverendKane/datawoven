@@ -1,4 +1,3 @@
-# ocr_tab.py
 """
 OCR Mode Tab - Screenshot capture and OCR processing
 """
@@ -7,10 +6,15 @@ from PySide6.QtWidgets import (
     QSplitter, QGroupBox, QFormLayout, QCheckBox, QProgressBar
 )
 from PySide6.QtCore import Qt
-from pathlib import Path
 import tempfile
 import os
 from datetime import datetime
+import logging
+
+# ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+LOG_CTX = "OCRTab"
+log = logging.LoggerAdapter(logging.getLogger(__name__), {"ctx": LOG_CTX})
+# ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
 
 class OCRTab(QWidget):
