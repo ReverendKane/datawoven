@@ -1,20 +1,38 @@
-# auto_tab.py
 """
 Auto Mode Tab - Batch processing and automation
 Contains three sub-tabs: Assignment Builder, Queue, and Cost Analytics
 """
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QTabWidget, QLabel,
-    QSplitter, QGroupBox, QPushButton, QTreeWidget, QTreeWidgetItem,
-    QComboBox, QLineEdit, QCheckBox, QSpinBox, QTextEdit, QFormLayout,
-    QFileDialog, QMessageBox, QDialog, QDialogButtonBox, QScrollArea, QFrame
+    QWidget, QVBoxLayout, QHBoxLayout, QTabWidget, QLabel, QStackedWidget,QTableWidget,
+    QSplitter, QGroupBox, QPushButton, QTreeWidget, QTreeWidgetItem, QListWidget, QTableWidgetItem,
+    QComboBox, QLineEdit, QCheckBox, QSpinBox, QTextEdit, QFormLayout, QHeaderView, QAbstractItemView,
+    QFileDialog, QMessageBox, QDialog, QDialogButtonBox, QScrollArea, QFrame, QInputDialog
 )
-from PySide6.QtCore import Qt, Signal, QThread
+
+from PySide6.QtCore import Qt, Signal, Slot, QThread
 from pathlib import Path
 from datetime import datetime
+from website_tree_crawler import WebsiteTreeCrawler
+from cost_tracker import CostTracker
+from web_scraping_tab import DomainRateLimiter, _rate_limiter
+from urllib.parse import urlparse
+
+import openai
+import google.generativeai as genai
+import anthropic
 import json
 import uuid
 import logging
+import gzip
+import cv2
+import fitz
+import chardet
+import os
+import pytesseract
+from PIL import Image
+import io
+import requests
+from bs4 import BeautifulSoup
 
 # ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 LOG_CTX = "AutoTab"
@@ -37,7 +55,6 @@ class QueueProcessorThread(QThread):
         self.output_folder = output_folder
 
         # Initialize cost tracker with custom database path
-        from cost_tracker import CostTracker
         self.cost_tracker = CostTracker(db_path=database_path)
         self.current_batch_id = None
 
@@ -273,7 +290,6 @@ class QueueProcessorThread(QThread):
         output_md = ocr_output / f"{folder_name}.md"
         output_json = ocr_output / f"{folder_name}.json"
 
-        import gzip
         with gzip.open(output_txt, 'wt', encoding='utf-8') as f:
             f.write(combined_ocr)
 
@@ -358,7 +374,6 @@ class QueueProcessorThread(QThread):
         output_md = ocr_output / f"{stem}.md"
         output_json = ocr_output / f"{stem}.json"
 
-        import gzip
         with gzip.open(output_txt, 'wt', encoding='utf-8') as f:
             f.write(ocr_text)
 
@@ -372,9 +387,6 @@ class QueueProcessorThread(QThread):
 
     def run_ocr_sync(self, image_path, preprocess):
         """Run OCR"""
-        import cv2
-        import pytesseract
-
         try:
             img = cv2.imread(str(image_path))
 
@@ -404,8 +416,6 @@ class QueueProcessorThread(QThread):
 
     def run_summarization_sync(self, text, provider="OpenAI"):
         """Run AI summarization with specified provider and return tokens used"""
-        import os
-
         try:
             word_count = len(text.split())
             if word_count < 500:
@@ -434,7 +444,6 @@ NOTES:
 [your notes here]"""
 
             if provider == "OpenAI":
-                import openai
                 api_key = os.getenv("OPENAI_API_KEY")
                 if not api_key:
                     self.log_signal.emit(f"    ⚠ No OpenAI API key - skipping summarization")
@@ -451,7 +460,6 @@ NOTES:
                 output_tokens = response.usage.completion_tokens
 
             elif provider == "Claude":
-                import anthropic
                 api_key = os.getenv("ANTHROPIC_API_KEY")
                 if not api_key:
                     self.log_signal.emit(f"    ⚠ No Anthropic API key - skipping summarization")
@@ -468,7 +476,6 @@ NOTES:
                 output_tokens = message.usage.output_tokens
 
             elif provider == "Gemini":
-                import google.generativeai as genai
                 api_key = os.getenv("GEMINI_API_KEY")
                 if not api_key:
                     self.log_signal.emit(f"    ⚠ No Gemini API key - skipping summarization")
@@ -587,8 +594,6 @@ NOTES:
 
     def process_pdf_assignment(self, assignment, base_output_folder):
         """Process PDF assignment - handles subdirectories like OCR/Text"""
-        import fitz
-
         source_folder = assignment.get("source_folder", "")
         file_pattern = assignment.get("file_pattern", "*.pdf")
         detect_chapters = assignment.get("detect_chapters", False)
@@ -649,7 +654,6 @@ NOTES:
     def process_pdf_subdirectory(self, subdir, patterns, output_dir, detect_chapters, use_ocr, enable_summarization,
                                  assignment):
         """Process PDF subdirectory - combine all PDFs"""
-        import fitz
 
         files = []
         for pattern in patterns:
@@ -737,7 +741,6 @@ NOTES:
         output_md = output_dir / f"{folder_name}.md"
         output_json = output_dir / f"{folder_name}.json"
 
-        import gzip
         with gzip.open(output_txt, 'wt', encoding='utf-8') as f:
             f.write(combined_text)
         with open(output_md, 'w', encoding='utf-8') as f:
@@ -809,7 +812,6 @@ NOTES:
         output_md = output_dir / f"{file_path.stem}.md"
         output_json = output_dir / f"{file_path.stem}.json"
 
-        import gzip
         with gzip.open(output_txt, 'wt', encoding='utf-8') as f:
             f.write(text)
         with open(output_md, 'w', encoding='utf-8') as f:
@@ -821,8 +823,6 @@ NOTES:
 
     def _extract_pdf_text(self, pdf_path, detect_chapters, use_ocr):
         """Extract text from PDF"""
-        import fitz
-
         try:
             doc = fitz.open(pdf_path)
             content = []
@@ -833,9 +833,6 @@ NOTES:
 
                 if not text.strip() and use_ocr:
                     try:
-                        import pytesseract
-                        from PIL import Image
-                        import io
                         pix = page.get_pixmap()
                         img = Image.open(io.BytesIO(pix.tobytes()))
                         text = pytesseract.image_to_string(img)
@@ -1016,7 +1013,6 @@ NOTES:
         output_md = output_dir / f"{folder_name}.md"
         output_json = output_dir / f"{folder_name}.json"
 
-        import gzip
         with gzip.open(output_txt, 'wt', encoding='utf-8') as f:
             f.write(combined_text)
 
@@ -1101,7 +1097,6 @@ NOTES:
         output_md = output_dir / f"{file_path.stem}.md"
         output_json = output_dir / f"{file_path.stem}.json"
 
-        import gzip
         with gzip.open(output_txt, 'wt', encoding='utf-8') as f:
             f.write(text)
 
@@ -1122,7 +1117,6 @@ NOTES:
                     return f.read()
             except UnicodeDecodeError:
                 # Detect encoding
-                import chardet
                 with open(path, 'rb') as f:
                     raw_data = f.read()
                     result = chardet.detect(raw_data)
@@ -1137,9 +1131,6 @@ NOTES:
 
     def process_web_assignment(self, assignment, base_output_folder):
         """Process website crawler assignment"""
-        from web_scraping_tab import WebScraperProcessor, WebScrapingResult, _rate_limiter
-        import gzip
-
         # Get assignment config
         selected_urls = assignment.get("selected_urls", [])
         extraction_method = assignment.get("extraction_method", "Auto-detect")
@@ -1165,14 +1156,10 @@ NOTES:
 
             try:
                 # Wait for rate limiting
-                from urllib.parse import urlparse
                 domain = urlparse(url).netloc
                 _rate_limiter.wait_if_needed(domain)
 
                 # Scrape page (synchronous for now)
-                import requests
-                from bs4 import BeautifulSoup
-
                 headers = {'User-Agent': 'DataWoven/1.0 (Knowledge Capture Tool)'}
                 response = requests.get(url, headers=headers, timeout=10)
                 response.raise_for_status()
@@ -1289,6 +1276,10 @@ class AutoTab(QWidget):
         self.shared_components = shared_components
         self.metadata_panel = metadata_panel
 
+        # Project context (set via parent signal)
+        self.current_project_name: str | None = None
+        self.current_project_path: str | None = None
+
         # Database path for project-specific cost tracking
         self.database_path = None
 
@@ -1348,8 +1339,6 @@ class AutoTab(QWidget):
 
     def create_builder_left_panel(self):
         """Create the left panel with assignment type selector and config"""
-        from PySide6.QtWidgets import QStackedWidget
-
         panel = QWidget()
         layout = QVBoxLayout(panel)
 
@@ -1914,9 +1903,6 @@ class AutoTab(QWidget):
 
         layout.addLayout(header_layout)
 
-        # Queue list area
-        from PySide6.QtWidgets import QListWidget
-
         self.queue_list = QListWidget()
         self.queue_list.setAlternatingRowColors(True)
         self.queue_list.itemSelectionChanged.connect(self.on_queue_selection_changed)
@@ -1988,8 +1974,6 @@ class AutoTab(QWidget):
         batches_group = QGroupBox("Recent Batches")
         batches_layout = QVBoxLayout(batches_group)
 
-        from PySide6.QtWidgets import QTableWidget, QHeaderView, QAbstractItemView
-
         self.batches_table = QTableWidget()
         self.batches_table.setColumnCount(6)
         self.batches_table.setHorizontalHeaderLabels([
@@ -2020,8 +2004,6 @@ class AutoTab(QWidget):
 
     def refresh_analytics(self):
         """Refresh all analytics data from database"""
-        from cost_tracker import CostTracker
-
         # Use project-specific database path if available
         tracker = CostTracker(db_path=self.database_path)
 
@@ -2040,8 +2022,6 @@ class AutoTab(QWidget):
 
         for row_idx, batch in enumerate(batches):
             # Batch name
-            from PySide6.QtWidgets import QTableWidgetItem
-
             name_item = QTableWidgetItem(batch['batch_name'] or "Unnamed")
             self.batches_table.setItem(row_idx, 0, name_item)
 
@@ -2093,9 +2073,6 @@ class AutoTab(QWidget):
         """Initialize web crawler with database path"""
         if not hasattr(self, 'database_path') or not self.database_path:
             return
-
-        from website_tree_crawler import WebsiteTreeCrawler
-        from web_scraping_tab import DomainRateLimiter
 
         rate_limiter = DomainRateLimiter()
         self.web_crawler = WebsiteTreeCrawler(
@@ -2306,8 +2283,6 @@ class AutoTab(QWidget):
             return
 
         # Prompt for cluster name
-        from PySide6.QtWidgets import QInputDialog
-
         cluster_name, ok = QInputDialog.getText(
             self,
             "Save Cluster",
@@ -2350,8 +2325,6 @@ class AutoTab(QWidget):
             return
 
         # Show selection dialog
-        from PySide6.QtWidgets import QInputDialog
-
         cluster_names = [f"{c['cluster_name']} ({c['url_count']} pages)" for c in clusters]
         cluster_name, ok = QInputDialog.getItem(
             self,
@@ -2410,11 +2383,14 @@ class AutoTab(QWidget):
         self.update_preview()
 
     def browse_source_folder(self):
-        """Open folder browser dialog"""
+        """Open folder browser dialog for ocr files"""
+        start_directory = Path(self.current_project_path) / "ocr"
+        start_directory.mkdir(parents=True, exist_ok=True)
+
         folder = QFileDialog.getExistingDirectory(
             self,
             "Select Source Folder",
-            ""
+            str(start_directory),
         )
 
         if folder:
@@ -2422,10 +2398,13 @@ class AutoTab(QWidget):
 
     def browse_text_source_folder(self):
         """Open folder browser dialog for text files"""
+        start_directory = Path(self.current_project_path) / "text"
+        start_directory.mkdir(parents=True, exist_ok=True)
+
         folder = QFileDialog.getExistingDirectory(
             self,
             "Select Text Source Folder",
-            ""
+            str(start_directory),
         )
 
         if folder:
@@ -2433,10 +2412,13 @@ class AutoTab(QWidget):
 
     def browse_pdf_source_folder(self):
         """Open folder browser dialog for PDF files"""
+        start_directory = Path(self.current_project_path) / "pdf"
+        start_directory.mkdir(parents=True, exist_ok=True)
+
         folder = QFileDialog.getExistingDirectory(
             self,
             "Select PDF Source Folder",
-            ""
+            str(start_directory),
         )
 
         if folder:
@@ -3031,6 +3013,16 @@ class AutoTab(QWidget):
         """Get current database path"""
         return self.database_path
 
+    @Slot(str, str)
+    def set_project_context(self, project_name: str, project_path: str) -> None:
+        """Called by parent when project changes (or on initial kick)."""
+        self.current_project_name = project_name
+        self.current_project_path = project_path
+        # If anything in the UI depends on project path, refresh it here:
+        # self.refresh_assignments_for_project()
+        # If you also derive DB path from project, you can set it here too:
+        # self.set_database_path(Path(project_path) / "data" / "auto_tab.sqlite")
+
 
 class MetadataDialog(QWidget):
     """Dialog for adding/editing metadata for assignments or files"""
@@ -3142,9 +3134,6 @@ class MetadataDialog(QWidget):
         """Initialize web crawler with database path"""
         if not hasattr(self, "database_path") or not self.database_path:
             return
-
-        from website_tree_crawler import WebsiteTreeCrawler
-        from web_scraping_tab import DomainRateLimiter
 
         rate_limiter = DomainRateLimiter()
         self.web_crawler = WebsiteTreeCrawler(

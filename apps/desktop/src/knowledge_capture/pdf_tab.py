@@ -16,6 +16,9 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QThread, Signal
 import fitz  # PyMuPDF
 import re
+import pytesseract
+from PIL import Image
+import io
 
 # ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 LOG_CTX = "PDFTab"
@@ -63,7 +66,7 @@ class PDFProcessor(QThread):
                 result = self.process_single_pdf(pdf_path)
                 results.append(result)
             except Exception as e:
-                _LOGGER.error(f"Failed to process {pdf_path}: {e}")
+                log.error(f"Failed to process {pdf_path}: {e}")
                 results.append(PDFProcessingResult(
                     file_path=pdf_path,
                     success=False,
@@ -234,7 +237,7 @@ class PDFProcessor(QThread):
                     try:
                         text = self.ocr_page(page)
                     except Exception as e:
-                        _LOGGER.warning(f"OCR failed for page {page_num + 1}: {e}")
+                        log.warning(f"OCR failed for page {page_num + 1}: {e}")
                         failed_pages.append(page_num + 1)
                         continue
 
@@ -245,17 +248,13 @@ class PDFProcessor(QThread):
                     failed_pages.append(page_num + 1)
 
             except Exception as e:
-                _LOGGER.error(f"Failed to extract page {page_num + 1}: {e}")
+                log.error(f"Failed to extract page {page_num + 1}: {e}")
                 failed_pages.append(page_num + 1)
 
         return "\n\n".join(content), failed_pages
 
     def ocr_page(self, page: fitz.Page) -> str:
         """Perform OCR on a PDF page using Tesseract"""
-        import pytesseract
-        from PIL import Image
-        import io
-
         # Convert page to image
         pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))  # 2x zoom for better OCR
         img_data = pix.tobytes("png")
@@ -275,7 +274,7 @@ class PDFTab(QWidget):
         self.shared_components = shared_components
         self.metadata_panel = metadata_panel
 
-        _LOGGER.info("PDFTab initialized")
+        log.info("PDFTab initialized")
 
         self._processing = False
         self._pdf_processor = None
@@ -585,7 +584,7 @@ class PDFTab(QWidget):
 
     def start_processing(self):
         """Start PDF processing"""
-        _LOGGER.info("Starting PDF processing")
+        log.info("Starting PDF processing")
 
         # Collect PDF files to process
         pdf_files = []
@@ -838,7 +837,7 @@ class PDFTab(QWidget):
         with open(json_path, 'w', encoding='utf-8') as f:
             json.dump(metadata, f, indent=2, ensure_ascii=False)
 
-        _LOGGER.info(f"Saved: {md_path} and {json_path}")
+        log.info(f"Saved: {md_path} and {json_path}")
 
     def reset_fields(self):
         """Reset all fields and content"""

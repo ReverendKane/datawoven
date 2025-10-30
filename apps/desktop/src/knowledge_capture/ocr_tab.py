@@ -2,10 +2,12 @@
 OCR Mode Tab - Screenshot capture and OCR processing
 """
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QTextEdit, QPushButton,
-    QSplitter, QGroupBox, QFormLayout, QCheckBox, QProgressBar
+    QWidget, QVBoxLayout, QHBoxLayout, QTextEdit, QPushButton, QTabWidget, QMessageBox,
+    QSplitter, QGroupBox, QFormLayout, QCheckBox, QProgressBar, QApplication
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QRect
+from PySide6.QtGui import QPainter, QPixmap
+
 import tempfile
 import os
 from datetime import datetime
@@ -86,8 +88,6 @@ class OCRTab(QWidget):
 
     def create_ocr_text_panel(self):
         """Create the OCR text processing panel"""
-        from PySide6.QtWidgets import QTabWidget
-
         panel = QWidget()
         layout = QVBoxLayout(panel)
 
@@ -147,10 +147,6 @@ class OCRTab(QWidget):
 
     def start_screenshot_capture(self):
         """Start the screenshot capture process"""
-        from PySide6.QtWidgets import QApplication
-        from PySide6.QtCore import QRect
-        from PySide6.QtGui import QPainter, QPixmap
-
         # Import ScreenshotCapture from parent's module
         ScreenshotCapture = self.parent.ScreenshotCapture
 
@@ -160,8 +156,6 @@ class OCRTab(QWidget):
 
     def handle_screenshot(self, pixmap):
         """Handle captured screenshot"""
-        from PySide6.QtGui import QPixmap
-
         # Save screenshot to temp file
         temp_dir = tempfile.gettempdir()
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -179,10 +173,6 @@ class OCRTab(QWidget):
 
     def capture_fullscreen(self):
         """Capture full screen using the enhanced system"""
-        from PySide6.QtWidgets import QApplication
-        from PySide6.QtCore import QRect, Qt
-        from PySide6.QtGui import QPainter, QPixmap
-
         app = QApplication.instance()
         screens = app.screens()
 
@@ -250,8 +240,6 @@ class OCRTab(QWidget):
 
     def handle_ocr_error(self, error):
         """Handle OCR error"""
-        from PySide6.QtWidgets import QMessageBox
-
         self.progress_bar.setVisible(False)
         self.parent.statusBar().showMessage("OCR failed")
         QMessageBox.warning(self, "OCR Error", f"OCR processing failed: {error}")

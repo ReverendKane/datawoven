@@ -80,31 +80,26 @@ log = logging.LoggerAdapter(logging.getLogger(__name__), {"ctx": LOG_CTX})
 # ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
 
-from PySide6.QtWidgets import QApplication, QWidget, QSizePolicy
-import sys, os, json, uuid, tempfile, requests
+import sys, os, uuid, requests
 from dotenv import load_dotenv
 import openai, anthropic
 import google.generativeai as genai
-from pathlib import Path
-from datetime import datetime
+import re
 import json, gzip, hashlib
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, Dict, Any
-import cv2, numpy as np, pytesseract
-from PIL import Image, ImageEnhance, ImageFilter
+import cv2
+from PIL import Image
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QTextEdit, QLineEdit, QLabel, QPushButton, QFileDialog, QMessageBox,
-    QTabWidget, QScrollArea, QFrame, QSplitter, QGroupBox, QFormLayout,
-    QCheckBox, QSpinBox, QComboBox, QProgressBar
+    QTabWidget, QScrollArea, QFrame, QGroupBox, QFormLayout, QMenu,
+    QCheckBox, QComboBox
 )
 from PySide6.QtCore import Qt, QThread, Signal, QTimer, QSettings, QPoint, QRect
 from PySide6.QtGui import (
-    QPixmap, QScreen, QPainter, QPen, QColor, QFont, QAction,
-    QKeySequence, QShortcut, QIcon, QTextCharFormat, QTextCursor
+    QPixmap, QPainter, QPen, QColor, QKeySequence, QShortcut
 )
-from markdown_dialog import MarkdownDialog
 
 # Import modular tabs
 from ocr_tab import OCRTab
@@ -115,7 +110,6 @@ from web_scraping_tab import WebScrapingTab
 from post_processing_tab import PostProcessingTab
 from auto_tab import AutoTab
 from project_selector import ProjectSelector
-
 import pytesseract
 
 pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
@@ -389,7 +383,6 @@ class MultiProviderSummarizationProcessor(QThread):
         return self.clean_intro_text(response.text.strip())
 
     def clean_intro_text(self, text: str) -> str:
-        import re
         for p in [r'^Here is.*?:', r'^This.*?:', r'^The.*?:', r'^Summary:', r'^Based on.*?:']:
             text = re.sub(p, '', text, flags=re.IGNORECASE).strip()
         for p in [r'[Tt]his (book|chapter)[^\.]*?\.?\s*', r'[Ww]e (will|intend)[^\.]*?\.?\s*',
@@ -424,7 +417,6 @@ class MultiProviderSummarizationProcessor(QThread):
         raise Exception(f"Ollama failed: {response.status_code}")
 
     def extractive_summarize(self, text: str) -> str:
-        import re
         sentences = re.split(r'[.!?]+\s+', text.replace('\n', ' '))
         sentences = [s.strip() for s in sentences if s.strip()]
         if len(sentences) <= 3:
@@ -613,10 +605,6 @@ class MetadataPanel(QWidget):
         self.notes_input.setPlaceholderText("Additional notes...")
         self.notes_input.setMaximumHeight(80)
         form.addRow("Notes:", self.notes_input)
-
-        # Save To field removed - auto-routing based on tab/project handles all paths
-        # Paths are deterministic: /DATA/project-name/raw-output/{source-type}/
-
         layout.addLayout(form)
 
         self.setStyleSheet("""
@@ -709,11 +697,17 @@ class MetadataPanel(QWidget):
     def save_as_defaults(self):
         try:
             defaults_path = Path(self.output_folder_callback()) / "metadata_defaults.json"
-            defaults = {"source_type": self.source_type.currentText(), "author": self.author_input.text().strip(),
-                        "tags": self.tags_input.text().strip(), "priority": self.priority.currentText(),
-                        "ready_for_processing": self.ready_checkbox.isChecked(), "quality": self.quality.currentText()}
-            with open(defaults_path, 'w', encoding='utf-8') as f:
-                json.dump(defaults, f, indent=2)
+            defaults_path.parent.mkdir(parents=True, exist_ok=True)
+            defaults = {
+                "source_type": self.source_type.currentText(),
+                "author": self.author_input.text().strip(),
+                "tags": self.tags_input.text().strip(),
+                "priority": self.priority.currentText(),
+                "ready_for_processing": self.ready_checkbox.isChecked(),
+                "quality": self.quality.currentText()
+            }
+            with defaults_path.open("w", encoding="utf-8") as f:
+                json.dump(defaults, f, indent=2, ensure_ascii=False)
         except Exception as e:
             log.info(f"Failed to save defaults: {e}")
 
@@ -730,7 +724,6 @@ class MetadataPanel(QWidget):
         self.notes_input.clear()
 
     def show_quick_fill_menu(self):
-        from PySide6.QtWidgets import QMenu
         menu = QMenu(self)
         menu.addAction("Book Chapter").triggered.connect(self.quick_fill_book)
         menu.addAction("Web Article").triggered.connect(self.quick_fill_web)
@@ -830,6 +823,15 @@ class KnowledgeCaptureApp(QMainWindow):
 
         self.auto_tab = AutoTab(self, shared, self.metadata_panel)
         self.mode_tabs.addTab(self.auto_tab, "Auto")
+
+        # Connect the selector's project change signal to the Auto tab
+        self.project_selector.project_changed.connect(self.auto_tab.set_project_context)
+
+        # Push the initial project once on startup
+        name = self.project_selector.get_current_project()
+        path = self.project_selector.get_current_project_path()
+        if name and path:
+            self.auto_tab.set_project_context(name, path)
 
         self.statusBar().showMessage("Ready for knowledge capture")
         self.ocr_tab.ai_provider.currentTextChanged.connect(self.sync_ai_providers)

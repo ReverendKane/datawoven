@@ -1,4 +1,3 @@
-# web_scraping_tab.py
 """
 Web Scraping Tab for Knowledge Capture Tool
 Intelligent content extraction with multiple fallback strategies
@@ -173,7 +172,6 @@ class WebScraperProcessor(QThread):
     }"""
 
     def _normalize_ws(self, text: str) -> str:
-        import re
         return re.sub(r"\s+", " ", (text or "")).strip()
 
     def _clean_newlines(self, text: str) -> str:
@@ -183,7 +181,6 @@ class WebScraperProcessor(QThread):
         """
         if not text:
             return ""
-        import re
         # Replace literal backslash-n sequences
         text = text.replace("\\n", " ")
         # Collapse multiple newlines down to two
@@ -226,7 +223,6 @@ class WebScraperProcessor(QThread):
             pass
         # Fallback to existing path
         try:
-            from bs4 import BeautifulSoup
             parser = "lxml" if "lxml" in sys.modules else "html.parser"
             soup = BeautifulSoup(html, parser)
             return self.extract_content_intelligent(soup)

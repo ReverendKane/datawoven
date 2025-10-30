@@ -1,4 +1,3 @@
-# text_input_tab.py
 """
 Text Input Mode Tab - Direct text input and document file loading
 """
@@ -7,7 +6,7 @@ from pathlib import Path
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTextEdit, QPushButton,
     QSplitter, QGroupBox, QProgressBar, QTabWidget, QLineEdit,
-    QFileDialog, QMessageBox
+    QFileDialog, QMessageBox, QLabel
 )
 from PySide6.QtCore import Qt, QTimer
 
@@ -18,6 +17,9 @@ from odf import text as odf_text, teletype
 from odf.opendocument import load as odf_load  # odfpy for .odt files
 from bs4 import BeautifulSoup  # beautifulsoup4 for .html files
 import chardet  # chardet for encoding detection
+import subprocess
+import tempfile
+import win32com.client
 
 # ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 LOG_CTX = "TextInputTab"
@@ -51,7 +53,6 @@ class TextInputTab(QWidget):
         # Text input instructions
         info_group = QGroupBox("Text Input")
         info_layout = QVBoxLayout(info_group)
-        from PySide6.QtWidgets import QLabel
         info_label = QLabel(
             "Load text from files or paste/type content directly for processing and summarization.")
         info_label.setWordWrap(True)
@@ -238,7 +239,7 @@ class TextInputTab(QWidget):
                     f"Loaded {path.name} - {word_count:,} words", 5000
                 )
 
-                _LOGGER.info(f"Successfully loaded file: {file_path} ({word_count} words)")
+                log.info(f"Successfully loaded file: {file_path} ({word_count} words)")
             else:
                 QMessageBox.warning(
                     self,
@@ -248,7 +249,7 @@ class TextInputTab(QWidget):
 
         except Exception as e:
             error_msg = f"Error loading file: {str(e)}"
-            _LOGGER.error(error_msg, exc_info=True)
+            log.error(error_msg, exc_info=True)
             QMessageBox.critical(self, "Load Error", error_msg)
             self.parent.statusBar().showMessage("File load failed", 5000)
 
@@ -266,12 +267,12 @@ class TextInputTab(QWidget):
                     result = chardet.detect(raw_data)
                     encoding = result['encoding'] or 'utf-8'
 
-                _LOGGER.info(f"Detected encoding: {encoding}")
+                log.info(f"Detected encoding: {encoding}")
                 with open(path, 'r', encoding=encoding) as f:
                     return f.read()
 
         except Exception as e:
-            _LOGGER.error(f"Error loading TXT file: {e}")
+            log.error(f"Error loading TXT file: {e}")
             raise
 
     def _load_docx_file(self, path: Path) -> str:
@@ -295,14 +296,12 @@ class TextInputTab(QWidget):
             return '\n\n'.join(text_parts)
 
         except Exception as e:
-            _LOGGER.error(f"Error loading DOCX file: {e}")
+            log.error(f"Error loading DOCX file: {e}")
             raise
 
     def _load_doc_file(self, path: Path) -> str:
         """Load legacy Microsoft Word .doc file"""
         try:
-            import win32com.client
-
             # Use COM automation on Windows
             word = win32com.client.Dispatch("Word.Application")
             word.Visible = False
@@ -318,9 +317,6 @@ class TextInputTab(QWidget):
         except ImportError:
             # Fallback: Convert to docx using LibreOffice if available
             try:
-                import subprocess
-                import tempfile
-
                 with tempfile.TemporaryDirectory() as tmpdir:
                     # Convert to docx using LibreOffice
                     subprocess.run([
@@ -341,7 +337,7 @@ class TextInputTab(QWidget):
                     "- LibreOffice (for conversion to .docx)"
                 )
         except Exception as e:
-            _LOGGER.error(f"Error loading DOC file: {e}")
+            log.error(f"Error loading DOC file: {e}")
             raise
 
     def _load_rtf_file(self, path: Path) -> str:
@@ -355,7 +351,7 @@ class TextInputTab(QWidget):
             return text
 
         except Exception as e:
-            _LOGGER.error(f"Error loading RTF file: {e}")
+            log.error(f"Error loading RTF file: {e}")
             raise
 
     def _load_odt_file(self, path: Path) -> str:
@@ -375,7 +371,7 @@ class TextInputTab(QWidget):
             return '\n\n'.join(text_parts)
 
         except Exception as e:
-            _LOGGER.error(f"Error loading ODT file: {e}")
+            log.error(f"Error loading ODT file: {e}")
             raise
 
     def _load_html_file(self, path: Path) -> str:
@@ -402,7 +398,7 @@ class TextInputTab(QWidget):
             return text
 
         except Exception as e:
-            _LOGGER.error(f"Error loading HTML file: {e}")
+            log.error(f"Error loading HTML file: {e}")
             raise
 
     def on_text_input_changed(self):

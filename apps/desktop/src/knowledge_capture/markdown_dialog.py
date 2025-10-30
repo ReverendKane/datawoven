@@ -1,6 +1,4 @@
-# markdown_dialog.py
 from PySide6.QtWidgets import QDialog, QVBoxLayout, QDialogButtonBox, QTextBrowser
-from PySide6.QtCore import Qt
 import markdown
 import re
 

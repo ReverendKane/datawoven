@@ -1,14 +1,13 @@
-# project_selector.py
 """
 Project Selector Widget - Manages project selection and paths
 """
 from PySide6.QtWidgets import (
-    QWidget, QHBoxLayout, QLabel, QComboBox, QPushButton,
-    QMessageBox, QInputDialog, QFileDialog, QFrame
+    QHBoxLayout, QLabel, QComboBox, QPushButton,
+    QMessageBox, QInputDialog, QFrame
 )
 from PySide6.QtCore import Qt, Signal, QTimer
-from PySide6.QtGui import QColor
 from pathlib import Path
+from cost_tracker import CostTracker
 import os
 from dotenv import load_dotenv
 import logging
@@ -243,7 +242,6 @@ class ProjectSelector(QFrame):
             (project_path / "automation-configs").mkdir(exist_ok=True)
 
             # Initialize cost tracking database
-            from cost_tracker import CostTracker
             db_path = tracking_dir / "project_tracking.db"
             cost_tracker = CostTracker(db_path=str(db_path))
             # Database is initialized automatically by CostTracker.__init__()

@@ -1,4 +1,3 @@
-# post_processing_tab.py
 """
 Post-Processing Tab - Validate and sync processed documents to S3
 """
@@ -10,6 +9,7 @@ from dataclasses import dataclass
 from datetime import datetime
 import json
 import hashlib
+import time
 
 from dotenv import load_dotenv
 
@@ -536,7 +536,6 @@ class PostProcessingTab(QWidget):
             return
 
         # Track sync start time for audit
-        import time
         start_time = time.time()
 
         # Start sync
